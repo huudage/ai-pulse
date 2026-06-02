@@ -1,0 +1,31 @@
+{
+  "_comment": "AI Pulse 自定义信源 — install.sh 会替换占位符 <TRENDRADAR_PATH>。Twitter API 因 X 反爬已停用所有公共抓取（rsshub/nitter/RSS-bridge 全部要么死要么 Cloudflare 反爬），改用 KOL 个人博客 RSS（深度内容反而比推文质量更高）。",
+  "sources": [
+    {
+      "id": "trendradar-cn-ai",
+      "type": "rss",
+      "name": "TrendRadar 中文 AI 热榜",
+      "url": "file://<TRENDRADAR_PATH>/output/rss/weekly-ai_focus.xml",
+      "enabled": true,
+      "priority": true,
+      "topics": ["llm", "frontier-tech"],
+      "note": "本地 TrendRadar 旁路导出的中文社区 7 天 RSS。由 trendradar.report.weekly_export 在 weekly-feedback.py --fetch-now 时按需生成。"
+    },
+
+    {
+      "_comment": "==== AI KOL 博客 RSS（替代 Twitter，覆盖核心思想领袖）===="
+    },
+
+    {"id": "kol-simonw",        "type": "rss", "name": "Simon Willison",                "url": "https://simonwillison.net/atom/everything/",   "enabled": true, "priority": true,  "topics": ["kol", "llm"]},
+    {"id": "kol-swyx",          "type": "rss", "name": "swyx.io (Latent Space)",        "url": "https://www.swyx.io/rss.xml",                  "enabled": true, "priority": true,  "topics": ["kol", "ai-agent"]},
+    {"id": "kol-latent-space",  "type": "rss", "name": "Latent Space podcast",          "url": "https://www.latent.space/feed",                 "enabled": true, "priority": true,  "topics": ["kol", "ai-agent", "podcast"]},
+    {"id": "kol-eladgil",       "type": "rss", "name": "Elad Gil",                      "url": "https://blog.eladgil.com/feed",                "enabled": true, "priority": false, "topics": ["kol", "builder"]},
+    {"id": "kol-oneusefulthing","type": "rss", "name": "One Useful Thing (Ethan Mollick)", "url": "https://www.oneusefulthing.org/feed",      "enabled": true, "priority": true,  "topics": ["kol", "llm"]},
+    {"id": "kol-zvi",           "type": "rss", "name": "Zvi Mowshowitz (don't worry...)", "url": "https://thezvi.substack.com/feed",            "enabled": true, "priority": false, "topics": ["kol", "frontier-tech"]},
+    {"id": "kol-interconnects", "type": "rss", "name": "Interconnects (Nathan Lambert)", "url": "https://www.interconnects.ai/feed",            "enabled": true, "priority": true,  "topics": ["kol", "llm"]},
+    {"id": "kol-lethain",       "type": "rss", "name": "Will Larson (Stratechery 风格 Eng)", "url": "https://lethain.com/feeds/",                "enabled": true, "priority": false, "topics": ["kol", "frontier-tech"]},
+    {"id": "kol-stratechery",   "type": "rss", "name": "Stratechery (Ben Thompson)",     "url": "https://stratechery.com/feed/",                "enabled": true, "priority": false, "topics": ["kol", "frontier-tech"]},
+    {"id": "kol-dwarkesh",      "type": "rss", "name": "Dwarkesh Patel podcast",        "url": "https://www.dwarkesh.com/feed",                "enabled": true, "priority": true,  "topics": ["kol", "podcast"]},
+    {"id": "kol-langmodels",    "type": "rss", "name": "Language Models Newsletter",   "url": "https://newsletter.languagemodels.co/feed",     "enabled": true, "priority": false, "topics": ["kol", "llm"]}
+  ]
+}

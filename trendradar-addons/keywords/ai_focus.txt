@@ -1,0 +1,172 @@
+# ═══════════════════════════════════════════════════════════════
+#                  AI 圈聚焦 - 关键词过滤
+#                         Version: 1.0.0
+# ═══════════════════════════════════════════════════════════════
+# 切到这个文件的两种方式：
+#
+# 方式 A（最简单，全局生效）：
+#   把项目根 config/frequency_words.txt 改名备份后，把本文件复制成它
+#
+# 方式 B（推荐，按时段切换）：
+#   在 config/timeline.yaml 想用 AI 关键词的时段下加一行：
+#       frequency_file: "ai_focus.txt"
+#   注意 timeline.yaml 里的 frequency_file 默认在 config/custom/keyword/ 下找
+#
+# 设计思路：
+#   - 只保留 AI 圈相关的关键词，砍掉其他领域
+#   - 每个公司/模型/方向独立成组，推送时分类清晰
+#   - 用正则 + 单词边界，避免 "AI" 误匹配 "MAIL/AIDS"
+# ═══════════════════════════════════════════════════════════════
+
+
+[GLOBAL_FILTER]
+# 过滤标题党
+震惊
+刚刚！
+太可怕
+# 过滤民生/泛娱乐噪音（GLOBAL_FILTER 只支持子串匹配，每行一个词）
+健身
+减肥
+减脂
+哑铃
+跑步
+马拉松
+# 过滤宏观政策/口号式标题（"大力推进 XX 融合发展" 这种通稿）
+大力推进
+学习贯彻
+战略部署
+高质量发展
+融合发展
+
+
+[WORD_GROUPS]
+
+# ═══════════════════════════════════════════════════════════════
+#                   1. 大模型公司 - 海外
+# ═══════════════════════════════════════════════════════════════
+
+/\bOpenAI\b|\bChatGPT\b|\bGPT-\d|\bSora\b|\bDALL-E\b|\bSam Altman\b|\bGreg Brockman\b/ => OpenAI
+
+/\bAnthropic\b|\bClaude\b|\bDario Amodei\b|\bClaude Code\b/ => Anthropic / Claude
+
+/\bDeepMind\b|\bGemini\b|\bGoogle AI\b|\bAlphaGo\b|\bAlphaFold\b/ => Google DeepMind
+
+/\bMeta AI\b|\bLlama\b|\bLLaMA\b|\bYann LeCun\b|\bFAIR\b/ => Meta / LLaMA
+
+/\bMistral\b|\bMixtral\b/ => Mistral
+
+/\bxAI\b|\bGrok\b/ => xAI / Grok
+
+/\bMicrosoft\s*Copilot\b|\bCopilot\b|\bSatya Nadella\b/ => Microsoft Copilot
+
+/\bPerplexity\b/ => Perplexity
+
+/\bHugging Face\b|\bHuggingFace\b/ => Hugging Face
+
+/\bRunway\b|\bMidjourney\b|\bStable Diffusion\b|\bStability AI\b|\bComfyUI\b/ => 图像 / 视频生成模型
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   2. 大模型公司 - 国产
+# ═══════════════════════════════════════════════════════════════
+
+/深度求索|幻方量化|梁文锋|\bDeepSeek\b/ => DeepSeek
+
+/通义|\bQwen\b|阿里云百炼/ => 通义千问 / Qwen
+
+/智谱|\bGLM\b|\bChatGLM\b|\bZhipu\b/ => 智谱 / GLM
+
+/\bMiniMax\b|海螺/ => MiniMax
+
+/月之暗面|\bKimi\b|\bMoonshot\b/ => Kimi / 月之暗面
+
+/百川|\bBaichuan\b|王小川/ => 百川
+
+/文心一言|\bERNIE\b|文心大模型/ => 百度文心
+
+/盘古大模型|华为云盘古/ => 华为盘古
+
+/混元|腾讯大模型/ => 腾讯混元
+
+/豆包|\bDoubao\b|字节大模型|火山方舟/ => 字节豆包
+
+/讯飞星火|\bSparkDesk\b/ => 讯飞星火
+
+/阶跃星辰|\bStep-\d/ => 阶跃星辰
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   3. AI 算力 / 基础设施
+# ═══════════════════════════════════════════════════════════════
+
+/英伟达|黄仁勋|\bNVIDIA\b|\bCUDA\b|\bH100\b|\bH200\b|\bB100\b|\bB200\b|\bBlackwell\b|\bHopper\b|\bGB200\b|\bJensen Huang\b/ => NVIDIA
+
+/苏姿丰|\bAMD\b|\bMI300\b|\bMI325\b|\bROCm\b|\bLisa Su\b/ => AMD
+
+/\bTPU\b|\bGroq\b|\bCerebras\b|\bSambaNova\b/ => 算力新势力
+
+/昇腾|\bAscend\b|海思|\bHiSilicon\b/ => 华为昇腾
+
+/寒武纪|燧原|摩尔线程|沐曦|壁仞|天数智芯/ => 国产 AI 芯片
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   4. AI Agent / 应用
+# ═══════════════════════════════════════════════════════════════
+
+/\bAI Agent\b|\bAgent\b.*\bAI\b|智能体|多智能体/ => AI Agent
+
+/\bRAG\b|检索增强/ => RAG
+
+/\bMCP\b|Model Context Protocol/ => MCP 协议
+
+/\bCursor\b|\bCopilot\b.*代码|\bWindsurf\b|\bAider\b|\bDevin\b|\bCline\b/ => AI 编程工具
+
+/\bComfyUI\b|\bLangChain\b|\bLlamaIndex\b|\bvLLM\b|\bOllama\b/ => AI 开源生态
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   5. 通用 AI 概念词
+# ═══════════════════════════════════════════════════════════════
+
+[AI 通用]
+/(?<![a-zA-Z])ai(?![a-zA-Z])/
+人工智能
+大模型
+\bLLM\b
+\bAGI\b
+\bASI\b
+生成式
+多模态
+开源模型
+推理模型
+预训练
+微调
+\bRLHF\b
+\bDPO\b
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   6. 具身智能 / 机器人
+# ═══════════════════════════════════════════════════════════════
+
+具身智能
+/\bFigure AI\b|\bFigure\b.*机器人|\b1X\b.*机器人/ => 人形机器人 海外
+/宇树|王兴兴|\bUnitree\b/ => 宇树
+/智元|稚晖君|彭志辉|AgiBot/ => 智元
+/众擎|EngineAI|赵同阳/ => 众擎
+/特斯拉.*Optimus|\bOptimus\b/ => 特斯拉 Optimus
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   7. 自动驾驶（AI 强相关）
+# ═══════════════════════════════════════════════════════════════
+
+/\bFSD\b|\bWaymo\b|自动驾驶|\bend-to-end\b.*驾驶|端到端.*驾驶|无人驾驶/ => 自动驾驶
+
+
+# ═══════════════════════════════════════════════════════════════
+#                   8. 监管 / 政策（AI 相关）
+# ═══════════════════════════════════════════════════════════════
+
+/AI.*监管|AI.*法案|\bEU AI Act\b|算法备案|生成式.*管理/ => AI 监管

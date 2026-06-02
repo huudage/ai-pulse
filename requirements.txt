@@ -1,0 +1,17 @@
+# ai-pulse 自身没有运行时依赖（所有 Python 代码作为 patch / addon 复制到上游仓里）
+# 这里列出的是上游仓 + addon 共同需要的 Python 包。
+# install.sh 会自动安装；如果你 --skip-deps，则手动 pip install -r requirements.txt。
+
+# 上游 TrendRadar 依赖（参见 TrendRadar/requirements.txt）
+requests>=2.31.0
+pyyaml>=6.0
+pytz>=2024.1
+litellm>=1.40.0  # TrendRadar 的 AI 翻译/分析/筛选可选用
+
+# 上游 follow-news 依赖（参见 follow-news/requirements.txt）
+feedparser>=6.0.0
+jsonschema>=4.0.0
+
+# 可选（不装也能跑，按需开启功能）
+# weasyprint>=60.0  # PDF 周报渲染
+# yt-dlp>=2024.1.0   # YouTube 播客元数据 + 转录

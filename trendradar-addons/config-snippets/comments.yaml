@@ -1,0 +1,17 @@
+# 把这一段追加到 TrendRadar 的 config/config.yaml 末尾
+# （或合并到现有结构里）
+#
+# 启用前请确认：
+#   - TrendRadar 已安装依赖（pip install -r requirements.txt）
+#   - 评论抓取会增加每次跑批耗时约 5-15 秒（取决于 top_n_titles）
+#   - 知乎 API 现在需要 cookie，纯匿名访问 403；B站可用
+
+comments:
+  enabled: true                       # 总开关（true=启用, false=关闭）
+  max_per_title: 3                    # 每条热榜抓几条评论
+  top_n_titles: 5                     # 每个平台只为前 N 条热榜抓评论
+  request_interval: 500               # 评论请求间隔（毫秒）
+  timeout: 8                          # 单次请求超时（秒）
+  platforms:                          # 启用评论抓取的平台白名单
+    # - zhihu                         # 注释掉知乎，等加 cookie 支持后开启
+    - bilibili-hot-search

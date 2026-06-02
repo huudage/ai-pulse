@@ -1,0 +1,35 @@
+# ai-pulse — 不要 commit 的本地状态
+
+# 上游仓库（install.sh 克隆到这里）
+upstream/
+
+# 安装时备份的旧文件
+.ai-pulse-backup/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 测试残留
+/tmp/td-*
+test-*.json
+*.tmp
+
+# 用户私有 workspace（如果有人在 ai-pulse 仓里直接放 workspace）
+workspace/
+
+# 用户私密 API key — 千万不要 commit
+.env
+.env.local
+.env.*.local

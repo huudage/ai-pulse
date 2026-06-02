@@ -1,0 +1,107 @@
+# follow-news Patch 参考
+
+本文档说明 `patches/follow-news/upstream.patch` **修改了上游哪些文件、修改了什么**。用途：
+
+- 升级上游 follow-news SHA 时知道要 rebase 哪些点
+- 手动 debug 时定位 patch 触碰到的 hook 位置
+
+**普通用户不需要看本文档** —— `install.sh` 已自动应用所有改动。
+
+patch 共修改 follow-news 上游的 **3 个文件**。
+
+---
+
+## 1. `scripts/fetch-rss.py` — 加 `file://` 协议支持
+
+找到 `fetch_feed_with_retry` 函数里 `for attempt in range(RETRY_COUNT + 1):` 循环内的 `try:` 块，把整段 cache + urlopen 逻辑改造成：
+
+```python
+        try:
+            req_headers = {"User-Agent": "FollowNews/2.0"}
+
+            # file:// — read local file directly, bypass HTTP cache/conditional headers.
+            # Lets local exporters (e.g. TrendRadar) feed RSS into the pipeline without an HTTP server.
+            if url.startswith("file://"):
+                from urllib.request import url2pathname
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                local_path = url2pathname(parsed.path)
+                with open(local_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                final_url = url
+            else:
+                # ... 原来的 HTTP cache + urlopen + URLError 处理逻辑全部缩进进 else 分支
+```
+
+约 8 行新增。原 HTTP 路径不变，只是缩进进 else 分支。
+
+---
+
+## 2. `scripts/run-pipeline.py` — 归档每日 merged JSON
+
+在 `argparse` 区域 `--debug` 参数下面新增：
+
+```python
+parser.add_argument(
+    "--no-archive-json",
+    dest="archive_json",
+    action="store_false",
+    default=True,
+    help="Skip archiving the final merged JSON into <archive-dir>/daily-json/<date>.json (default: archive)",
+)
+```
+
+在 `if args.debug:` 块之后新增：
+
+```python
+    # Archive the final merged JSON into <archive-dir>/daily-json/YYYY-MM-DD.json.
+    # Powers weekly-feedback.py: lets it pool the last N days of raw merged JSON
+    # for cross-day announcement/reaction correlation. No-op when --archive-dir
+    # is not provided, since there's no archive root to write into.
+    if args.archive_json and args.archive_dir:
+        import shutil
+        from datetime import datetime as _dt
+        try:
+            daily_dir = args.archive_dir / "daily-json"
+            daily_dir.mkdir(parents=True, exist_ok=True)
+            date_str = _dt.utcnow().strftime("%Y-%m-%d")
+            archived_path = daily_dir / f"{date_str}.json"
+            shutil.copy2(str(args.output), str(archived_path))
+            logger.info(f"📦 Archived merged JSON → {archived_path}")
+        except Exception as e:
+            logger.warning(f"Failed to archive daily JSON: {e}")
+```
+
+---
+
+## 3. `SKILL.md` — 加路由规则 5
+
+在 "Execution Routing Policy" 区域，第 4 条之后插入：
+
+```markdown
+5. **Weekly competitor monitor digest**
+   - When user asks for a "weekly", "本周", "this week", "周报", "竞品监控", "AI 圈周报" digest, or asks "what did the AI community say about <event>".
+   - Execute:
+     ```bash
+     python3 scripts/weekly-feedback.py \
+       --archive-dir <workspace>/archive/follow-news \
+       --days 7 \
+       --output /tmp/td-weekly-merged.json \
+       --markdown /tmp/td-weekly.md \
+       --enrich-tier1
+     ```
+   - `--enrich-tier1` invokes `scripts/enrich_comments.py` to fetch real HN / Reddit top comment text for Tier 1 announcements (zero-auth JSON APIs, no API key required).
+   - Then render the structured weekly JSON via `scripts/summarize-merged.py --input /tmp/td-weekly-merged.json --top 30` for inspection.
+   - **CRITICAL — Read `references/prompts/competitor-monitor.md` first and follow it strictly when writing the natural-language report.** That template defines the Tier 1/2/3 rules, the 3 dimensions (模型 / 工程架构 / Agent 产品), the 5-question deep-dive template per Tier 1 event, and the final report structure. Do not improvise.
+   - Each announcement article has a `_tier` heuristic pre-label; you may revise it per the prompt rules but must justify any change.
+   - For Tier 1 events, quote 2-3 entries from `enriched_comments` (verbatim, with 👍 counts). If empty, write "本周暂无显著社区讨论" — do not fabricate.
+   - Requires `<workspace>/archive/follow-news/daily-json/<YYYY-MM-DD>.json` to be present. If empty, run `run-pipeline.py --archive-dir <workspace>/archive/follow-news` once first to seed, and inform the user that the weekly digest will progressively fill out as daily archives accumulate.
+```
+
+完整内容也可以从 `follow-news-addons/skill-patches/routing-rule-5.md` 拷贝。
+
+---
+
+## workspace 自定义信源
+
+把 `follow-news-addons/workspace-config/follow-news-sources.json` 拷贝到 follow-news 仓的 `workspace/config/follow-news-sources.json`，**注意修改里面 URL 中的 TrendRadar 输出路径** 为你机器上的实际路径。

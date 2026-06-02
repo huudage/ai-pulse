@@ -1,0 +1,413 @@
+diff --git a/config/config.yaml b/config/config.yaml
+index 2a26e96b..10d9532d 100644
+--- a/config/config.yaml
++++ b/config/config.yaml
+@@ -127,6 +127,26 @@ rss:
+     #   max_age_days: 0               # 示例：禁用过滤，推送所有文章
+ 
+ 
++# ===============================================================
++# 3.5 评论抓取（实验性）
++#
++# 为支持的平台抓取热门评论，嵌入推送消息（仅在飞书/钉钉等通知里渲染）
++# 当前仅支持：
++#   - zhihu              知乎热榜 → 高赞回答前 N 条
++#   - bilibili-hot-search B站热搜 → Top 视频热门评论
++# 抓评论会增加运行耗时，且部分接口偶发风控，默认关闭
++# ===============================================================
++comments:
++  enabled: false                      # 总开关（true=启用, false=关闭）
++  max_per_title: 3                    # 每条热榜抓几条评论
++  top_n_titles: 5                     # 每个平台只为前 N 条热榜抓评论
++  request_interval: 500               # 评论请求间隔（毫秒）
++  timeout: 8                          # 单次请求超时（秒）
++  platforms:                          # 启用评论抓取的平台白名单
++    - zhihu
++    - bilibili-hot-search
++
++
+ # ===============================================================
+ # 4. 报告模式
+ # ===============================================================
+diff --git a/trendradar/__main__.py b/trendradar/__main__.py
+index 38a9f82d..e52a2f16 100644
+--- a/trendradar/__main__.py
++++ b/trendradar/__main__.py
+@@ -24,6 +24,7 @@ from trendradar import __version__
+ from trendradar.core import load_config, parse_multi_account_config, validate_paired_configs
+ from trendradar.core.analyzer import convert_keyword_stats_to_platform_stats
+ from trendradar.crawler import DataFetcher
++from trendradar.crawler.comments import CommentDispatcher
+ from trendradar.storage import convert_crawl_results_to_news_data
+ from trendradar.utils.time import DEFAULT_TIMEZONE, is_within_days, calculate_days_old
+ from trendradar.ai import AIAnalyzer, AIAnalysisResult
+@@ -239,6 +240,9 @@ class NewsAnalyzer:
+         self._setup_proxy()
+         self.data_fetcher = DataFetcher(self.proxy_url)
+ 
++        # 评论抓取（实验性）- 默认空字典，run() 中若启用会填充
++        self.comments_map: Dict[Tuple[str, str], List[Dict]] = {}
++
+         # 初始化存储管理器（使用 AppContext）
+         self._init_storage_manager()
+         # 注意：update_info 由 main() 函数设置，避免重复请求远程版本
+@@ -976,6 +980,9 @@ class NewsAnalyzer:
+             # 准备报告数据
+             report_data = self.ctx.prepare_report(stats, failed_ids, new_titles, id_to_name, mode, frequency_file=self.frequency_file)
+ 
++            # 注入评论数据到 report_data（实验性）
++            self._inject_comments_into_report(report_data, id_to_name)
++
+             # 是否发送版本更新信息
+             update_info_to_send = self.update_info if cfg["SHOW_VERSION_UPDATE"] else None
+ 
+@@ -1090,6 +1097,106 @@ class NewsAnalyzer:
+ 
+         return results, id_to_name, failed_ids
+ 
++    def _crawl_comments(self, results: Dict) -> Dict[Tuple[str, str], List[Dict]]:
++        """为白名单平台的 Top N 热榜抓取热门评论（实验性）
++
++        失败不阻塞主流程，整个步骤异常时返回空字典。
++        """
++        comments_cfg = self.ctx.config.get("COMMENTS", {})
++        if not comments_cfg.get("ENABLED", False):
++            return {}
++
++        platforms = comments_cfg.get("PLATFORMS", []) or []
++        if not platforms:
++            return {}
++
++        try:
++            dispatcher = CommentDispatcher(
++                enabled_platforms=platforms,
++                max_per_title=comments_cfg.get("MAX_PER_TITLE", 3),
++                top_n_titles=comments_cfg.get("TOP_N_TITLES", 5),
++                request_interval_ms=comments_cfg.get("REQUEST_INTERVAL", 500),
++                proxy_url=self.proxy_url or "",
++                timeout=comments_cfg.get("TIMEOUT", 8),
++            )
++            if not dispatcher.supported_platforms:
++                return {}
++
++            print(f"[评论] 抓取启动，目标平台: {dispatcher.supported_platforms}")
++            comments_map = dispatcher.crawl(results)
++            # 转换为可序列化的 dict 列表，避免下游处理 dataclass
++            return {key: [c.to_dict() for c in comments] for key, comments in comments_map.items()}
++        except Exception as e:
++            print(f"[评论] 抓取过程出错（跳过，不影响主流程）: {e}")
++            return {}
++
++    def _inject_comments_into_report(self, report_data: Dict, id_to_name: Optional[Dict]) -> None:
++        """把已抓取的评论挂到 report_data.stats[*].titles[*]["comments"]
++
++        通过 source_name 反查 platform_id，匹配 (platform_id, title) 命中后挂载。
++        无评论的条目不写键，渲染层凭 .get("comments") 决定是否显示。
++        """
++        if not self.comments_map or not report_data or not report_data.get("stats"):
++            return
++
++        name_to_id = {name: pid for pid, name in (id_to_name or {}).items()}
++        injected = 0
++        for stat in report_data["stats"]:
++            for title_data in stat.get("titles", []):
++                source_name = title_data.get("source_name", "")
++                title_text = title_data.get("title", "")
++                platform_id = name_to_id.get(source_name)
++                if not platform_id:
++                    continue
++                comments = self.comments_map.get((platform_id, title_text))
++                if comments:
++                    title_data["comments"] = comments
++                    injected += 1
++
++        if injected:
++            print(f"[评论] 已注入 {injected} 条热榜的评论到推送数据")
++
++    def _export_rss_sidecar(self, stats: Optional[List[Dict]]) -> None:
++        """把当次 stats 旁路导出成 Atom XML，给 follow-news 等聚合器消费。
++
++        会把评论数据（self.comments_map）也注入到副本里再导出。
++        失败只打日志，不阻塞主流程。
++        """
++        if not stats:
++            return
++        try:
++            from copy import deepcopy
++            from trendradar.report import export_rss
++
++            stats_copy = deepcopy(stats)
++
++            # 注入评论到副本（不污染原 stats，原 stats 还要给 notification 用）
++            if self.comments_map:
++                # 反查 source_name → platform_id；platforms 列表里有 id/name 对应关系
++                name_to_id = {}
++                for p in self.ctx.platforms:
++                    pid = p.get("id")
++                    pname = p.get("name", pid)
++                    if pid:
++                        name_to_id[pname] = pid
++
++                for stat in stats_copy:
++                    for title_data in stat.get("titles", []) or []:
++                        platform_id = name_to_id.get(title_data.get("source_name", ""))
++                        if not platform_id:
++                            continue
++                        cs = self.comments_map.get((platform_id, title_data.get("title", "")))
++                        if cs:
++                            title_data["comments"] = cs
++
++            export_rss(
++                stats_copy,
++                frequency_file=self.frequency_file,
++                generated_at=self.ctx.get_time(),
++            )
++        except Exception as e:
++            print(f"[RSS 导出] 旁路调用出错（跳过）: {e}")
++
+     def _crawl_rss_data(self) -> Tuple[Optional[List[Dict]], Optional[List[Dict]], Optional[List[Dict]], set]:
+         """
+         执行 RSS 数据抓取
+@@ -1676,6 +1783,9 @@ class NewsAnalyzer:
+             print(f"HTML报告已生成: {html_file}")
+             print(f"最新报告已更新: output/html/latest/{self.report_mode}.html")
+ 
++        # RSS 旁路导出（供 follow-news 等聚合器消费）
++        self._export_rss_sidecar(stats)
++
+         # 发送通知
+         if mode_strategy["should_send_notification"]:
+             standalone_data = self._prepare_standalone_data(
+@@ -1718,6 +1828,9 @@ class NewsAnalyzer:
+             # 抓取热榜数据
+             results, id_to_name, failed_ids = self._crawl_data()
+ 
++            # 抓取评论数据（实验性，仅白名单平台 Top N 条热榜）
++            self.comments_map = self._crawl_comments(results)
++
+             # 抓取 RSS 数据（如果启用），返回统计条目、新增条目和原始条目
+             rss_items, rss_new_items, raw_rss_items, rss_new_urls = self._crawl_rss_data()
+ 
+diff --git a/trendradar/core/loader.py b/trendradar/core/loader.py
+index 121f312c..fbc9e5d5 100644
+--- a/trendradar/core/loader.py
++++ b/trendradar/core/loader.py
+@@ -220,6 +220,31 @@ def _load_rss_config(config_data: Dict) -> Dict:
+     }
+ 
+ 
++def _load_comments_config(config_data: Dict) -> Dict:
++    """加载评论抓取配置（实验性，默认关闭）"""
++    comments = config_data.get("comments", {})
++
++    def _int(value, default):
++        try:
++            v = int(value)
++            return v if v >= 0 else default
++        except (TypeError, ValueError):
++            return default
++
++    platforms = comments.get("platforms", []) or []
++    if not isinstance(platforms, list):
++        platforms = []
++
++    return {
++        "ENABLED": bool(comments.get("enabled", False)),
++        "MAX_PER_TITLE": _int(comments.get("max_per_title", 3), 3),
++        "TOP_N_TITLES": _int(comments.get("top_n_titles", 5), 5),
++        "REQUEST_INTERVAL": _int(comments.get("request_interval", 500), 500),
++        "TIMEOUT": _int(comments.get("timeout", 8), 8),
++        "PLATFORMS": [str(p) for p in platforms if p],
++    }
++
++
+ def _load_display_config(config_data: Dict) -> Dict:
+     """加载推送内容显示配置"""
+     display = config_data.get("display", {})
+@@ -581,6 +606,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+     # RSS 配置
+     config["RSS"] = _load_rss_config(config_data)
+ 
++    # 评论抓取配置（实验性）
++    config["COMMENTS"] = _load_comments_config(config_data)
++
+     # AI 模型共享配置
+     config["AI"] = _load_ai_config(config_data)
+ 
+diff --git a/trendradar/report/__init__.py b/trendradar/report/__init__.py
+index f9bc0f0e..a2d0ecdb 100644
+--- a/trendradar/report/__init__.py
++++ b/trendradar/report/__init__.py
+@@ -20,6 +20,7 @@ from trendradar.report.helpers import (
+ )
+ from trendradar.report.formatter import format_title_for_platform
+ from trendradar.report.html import render_html_content
++from trendradar.report.rss_export import export_rss
+ from trendradar.report.generator import (
+     prepare_report_data,
+     generate_html_report,
+@@ -34,6 +35,8 @@ __all__ = [
+     "format_title_for_platform",
+     # HTML 渲染
+     "render_html_content",
++    # RSS 导出
++    "export_rss",
+     # 报告生成器
+     "prepare_report_data",
+     "generate_html_report",
+diff --git a/trendradar/report/formatter.py b/trendradar/report/formatter.py
+index 57e41fc2..6d97264e 100644
+--- a/trendradar/report/formatter.py
++++ b/trendradar/report/formatter.py
+@@ -5,11 +5,69 @@
+ 提供多平台标题格式化功能
+ """
+ 
+-from typing import Dict
++from typing import Dict, List
+ 
+ from trendradar.report.helpers import clean_title, html_escape, format_rank_display
+ 
+ 
++def _format_likes(n: int) -> str:
++    """点赞数压缩展示：1234 → 1.2k, 23456 → 2.3w"""
++    try:
++        n = int(n)
++    except (TypeError, ValueError):
++        return "0"
++    if n >= 10000:
++        return f"{n / 10000:.1f}w"
++    if n >= 1000:
++        return f"{n / 1000:.1f}k"
++    return str(n)
++
++
++def _render_comments_block(platform: str, comments: List[Dict]) -> str:
++    """按平台格式拼接评论块。无评论返回空串。"""
++    if not comments:
++        return ""
++
++    if platform == "telegram":
++        items = []
++        for c in comments:
++            content = html_escape((c.get("content") or "").strip())
++            author = html_escape(c.get("author") or "匿名")
++            likes = _format_likes(c.get("likes") or 0)
++            items.append(f"   • {content} — <i>{author}</i> 👍 {likes}")
++        return "\n💬 热评:\n" + "\n".join(items)
++
++    if platform == "html":
++        items = []
++        for c in comments:
++            content = html_escape((c.get("content") or "").strip())
++            author = html_escape(c.get("author") or "匿名")
++            likes = _format_likes(c.get("likes") or 0)
++            items.append(
++                f'<li>{content} — <span class="comment-author">{author}</span>'
++                f' <span class="comment-likes">👍 {likes}</span></li>'
++            )
++        return '<div class="comments-block">💬 热评：<ul>' + "".join(items) + "</ul></div>"
++
++    if platform == "slack":
++        items = []
++        for c in comments:
++            content = (c.get("content") or "").strip()
++            author = c.get("author") or "匿名"
++            likes = _format_likes(c.get("likes") or 0)
++            items.append(f"   • {content} — _{author}_ 👍 {likes}")
++        return "\n💬 热评:\n" + "\n".join(items)
++
++    # 通用 markdown 路径：feishu / dingtalk / wework / bark / ntfy
++    items = []
++    for c in comments:
++        content = (c.get("content") or "").strip()
++        author = c.get("author") or "匿名"
++        likes = _format_likes(c.get("likes") or 0)
++        items.append(f"   • {content} — *{author}* 👍 {likes}")
++    return "\n💬 热评:\n" + "\n".join(items)
++
++
+ def format_title_for_platform(
+     platform: str, title_data: Dict, show_source: bool = True, show_keyword: bool = False
+ ) -> str:
+@@ -38,6 +96,7 @@ def format_title_for_platform(
+             - mobile_url: 移动端链接（优先使用）
+             - is_new: 是否为新增标题（可选）
+             - matched_keyword: 匹配的关键词（可选，platform 模式使用）
++            - comments: 热门评论列表（可选），每项为 dict 含 content/author/likes
+         show_source: 是否显示来源名称（keyword 模式使用）
+         show_keyword: 是否显示关键词标签（platform 模式使用）
+ 
+@@ -56,6 +115,9 @@ def format_title_for_platform(
+     # 获取关键词标签（platform 模式使用）
+     keyword = title_data.get("matched_keyword", "") if show_keyword else ""
+ 
++    # 评论块（按平台格式生成；无评论时为空串）
++    comments_block = _render_comments_block(platform, title_data.get("comments") or [])
++
+     if platform == "feishu":
+         if link_url:
+             formatted_title = f"[{cleaned_title}]({link_url})"
+@@ -78,7 +140,7 @@ def format_title_for_platform(
+         if title_data["count"] > 1:
+             result += f" <font color='green'>({title_data['count']}次)</font>"
+ 
+-        return result
++        return result + comments_block
+ 
+     elif platform == "dingtalk":
+         if link_url:
+@@ -102,7 +164,7 @@ def format_title_for_platform(
+         if title_data["count"] > 1:
+             result += f" ({title_data['count']}次)"
+ 
+-        return result
++        return result + comments_block
+ 
+     elif platform in ("wework", "bark"):
+         # WeWork 和 Bark 使用 markdown 格式
+@@ -127,7 +189,7 @@ def format_title_for_platform(
+         if title_data["count"] > 1:
+             result += f" ({title_data['count']}次)"
+ 
+-        return result
++        return result + comments_block
+ 
+     elif platform == "telegram":
+         if link_url:
+@@ -151,7 +213,7 @@ def format_title_for_platform(
+         if title_data["count"] > 1:
+             result += f" <code>({title_data['count']}次)</code>"
+ 
+-        return result
++        return result + comments_block
+ 
+     elif platform == "ntfy":
+         if link_url:
+@@ -175,7 +237,7 @@ def format_title_for_platform(
+         if title_data["count"] > 1:
+             result += f" `({title_data['count']}次)`"
+ 
+-        return result
++        return result + comments_block
+ 
+     elif platform == "slack":
+         # Slack 使用 mrkdwn 格式
+@@ -205,7 +267,7 @@ def format_title_for_platform(
+         if title_data["count"] > 1:
+             result += f" `({title_data['count']}次)`"
+ 
+-        return result
++        return result + comments_block
+ 
+     elif platform == "html":
+         rank_display = format_rank_display(
+@@ -243,7 +305,7 @@ def format_title_for_platform(
+         if title_data.get("is_new"):
+             formatted_title = f"<div class='new-title'>🆕 {formatted_title}</div>"
+ 
+-        return formatted_title
++        return formatted_title + comments_block
+ 
+     else:
+         return cleaned_title
