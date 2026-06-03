@@ -255,55 +255,59 @@ def search_twitter(query: str) -> Dict[str, Any]:
         return {"status": "skipped: opencli binary not in PATH and OPENCLI_BIN not set",
                 "count": 0, "results": []}
 
-    try:
-        help_out = subprocess.run(
-            [opencli, "twitter", "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except Exception as e:
-        return {"status": f"skipped: opencli twitter --help failed: {e}",
-                "count": 0, "results": []}
-
-    if "search" not in ((help_out.stdout or "") + (help_out.stderr or "")).lower():
-        return {"status": "skipped: opencli twitter search subcommand not available in this version",
-                "count": 0, "results": []}
-
     cached = cache_get("twitter", query)
     if cached is not None:
         return cached
 
+    # Probe with 60s timeout — Windows .cmd wrappers have slow cold start.
+    # If `search` subcommand is missing, we'll get a clear non-zero rc + stderr
+    # below, no need for an extra --help round-trip.
     try:
         proc = subprocess.run(
             [opencli, "twitter", "search", query, "--limit", "30", "-f", "json"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=180,
+            encoding="utf-8", errors="replace",
         )
+    except subprocess.TimeoutExpired:
+        return {"status": "error: opencli twitter search timed out after 180s "
+                          "(opencli sometimes needs warm browser session for X scraping)",
+                "count": 0, "results": []}
     except Exception as e:
         return {"status": f"error: opencli twitter search failed: {e}",
                 "count": 0, "results": []}
 
     if proc.returncode != 0:
-        return {"status": f"error: opencli rc={proc.returncode}: {proc.stderr[:200]}",
+        stderr_tail = (proc.stderr or "")[-300:]
+        if "unknown command" in stderr_tail.lower() or "not a command" in stderr_tail.lower():
+            return {"status": "skipped: opencli build does not include 'twitter search' subcommand",
+                    "count": 0, "results": []}
+        return {"status": f"error: opencli rc={proc.returncode}: {stderr_tail}",
                 "count": 0, "results": []}
 
     try:
-        raw = json.loads(proc.stdout)
+        raw = json.loads(proc.stdout or "[]")
         if isinstance(raw, dict):
-            tweets = raw.get("tweets") or raw.get("data") or []
+            tweets = raw.get("tweets") or raw.get("data") or raw.get("results") or []
         else:
             tweets = raw
     except json.JSONDecodeError as e:
-        return {"status": f"error: opencli output not JSON: {e}",
+        return {"status": f"error: opencli output not JSON: {e}; head={(proc.stdout or '')[:200]}",
                 "count": 0, "results": []}
 
+    # opencli 1.8.0 schema confirmed: id / author / text / likes / views / url / created_at
     results = []
     for t in tweets:
+        if not isinstance(t, dict):
+            continue
         results.append({
             "text": t.get("text") or t.get("content") or "",
-            "author": t.get("author_handle") or t.get("user") or "",
+            "author": t.get("author") or t.get("author_handle") or t.get("user") or "",
             "url": t.get("url") or "",
-            "likes": t.get("favorite_count") or t.get("likes") or 0,
-            "retweets": t.get("retweet_count") or t.get("retweets") or 0,
+            "likes": int(t.get("likes") or t.get("favorite_count") or 0),
+            "retweets": int(t.get("retweets") or t.get("retweet_count") or 0),
+            "views": str(t.get("views") or ""),
             "created_at": t.get("created_at") or "",
+            "tweet_id": t.get("id") or "",
         })
 
     results.sort(key=lambda r: r.get("likes") or 0, reverse=True)
