@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ai-pulse 一句话部署：把 follow-news + TrendRadar + ai-pulse addons 打包成
-# OpenClaw skill，复制到 ~/.openclaw/skills/follow-news/。
+# OpenClaw skill，复制到 ~/.openclaw/skills/ai-pulse/。
 #
 # 工作流：
 #   1. 跑 install.sh 把上游 + addons 装到 <target>/ (默认 ../upstream/)
-#   2. 把 <target>/follow-news 整个目录拷到 SKILLS_DIR/follow-news/
+#   2. 把 <target>/follow-news 整个目录拷到 SKILLS_DIR/ai-pulse/
 #   3. 写一个 SKILL.md 头部，标注 ai-pulse 版本和 TrendRadar 依赖路径
 #   4. 跑 doctor.sh 验证
 #
@@ -43,7 +43,7 @@ fi
 
 FOLLOW_NEWS_SRC="$TARGET_DIR/follow-news"
 TRENDRADAR_SRC="$TARGET_DIR/TrendRadar"
-SKILL_DST="$SKILLS_DIR/follow-news"
+SKILL_DST="$SKILLS_DIR/ai-pulse"
 
 echo "=================================================="
 echo "AI Pulse — 一键部署 OpenClaw Skill"
@@ -71,11 +71,11 @@ if [ ! -f "$FOLLOW_NEWS_SRC/scripts/weekly-feedback.py" ]; then
     echo "  ❌ 缺 weekly-feedback.py — install.sh 没把 addons 复制进去"
     exit 1
 fi
-echo "  ✓ follow-news skill 文件齐全"
+echo "  ✓ ai-pulse skill 文件齐全"
 
 # ─── Step 3: 复制到 skill 目录 ───
 echo ""
-echo "▶ Step 3: 复制 follow-news → $SKILL_DST"
+echo "▶ Step 3: 复制 ai-pulse skill → $SKILL_DST"
 mkdir -p "$SKILLS_DIR"
 if [ -d "$SKILL_DST" ]; then
     echo "  已存在，备份到 ${SKILL_DST}.bak.$(date +%Y%m%d-%H%M%S) 并替换"
@@ -122,7 +122,7 @@ echo "目标:  $SKILL_DST"
 echo "版本:  $(grep -m1 '^version:' "$SKILL_DST/SKILL.md" | awk '{print $2}' | tr -d '\"')"
 echo ""
 echo "下一步（在 OpenClaw 里说一句）："
-echo "  \"用 follow-news skill 给我跑本周 AI 竞品监控周报\""
+echo "  \"用 ai-pulse skill 给我跑本周 AI 竞品监控周报\""
 echo ""
 echo "或命令行直接触发："
 echo "  bash $SKILL_DST/scripts/ai-pulse/weekly.sh"

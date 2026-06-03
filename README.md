@@ -152,7 +152,7 @@ bash deploy-skill.sh
 
 `deploy-skill.sh` 自动做：
 
-1. 把 `../upstream/follow-news/` 整个复制到 `~/.openclaw/skills/follow-news/`
+1. 把 `../upstream/follow-news/` 整个复制到 `~/.openclaw/skills/ai-pulse/`（skill 在 OpenClaw 中以 `ai-pulse` 名字注册，原 follow-news 上游被作为底层 pipeline 收编）
 2. 写 `.ai-pulse-config` 固化 `AI_PULSE_DIR` / `TRENDRADAR_DIR`（`weekly.sh` 启动时 source 它定位 TrendRadar）
 3. 复制 `scripts/{weekly,daily}.sh` 到 `skill/scripts/ai-pulse/`，让 skill 触发时直接看到入口
 
@@ -252,7 +252,9 @@ bash update.sh
 
 ```bash
 rm -rf ../upstream
-rm -rf ~/.openclaw/skills/follow-news
+rm -rf ~/.openclaw/skills/ai-pulse
+# 旧版本残留可能需要一并清除：
+# rm -rf ~/.openclaw/skills/follow-news
 rm -rf ai-pulse
 ```
 

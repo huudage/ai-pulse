@@ -2,6 +2,13 @@ diff --git a/SKILL.md b/SKILL.md
 index 70efac2..3c1153b 100644
 --- a/SKILL.md
 +++ b/SKILL.md
+@@ -1,5 +1,5 @@
+ ---
+-name: follow-news
++name: ai-pulse
+ description: Generate tech news digests with unified source model, quality scoring, and multi-format output. Seven-source data collection from RSS feeds, Twitter/X KOLs, GitHub releases, GitHub Trending, Reddit, web search, and podcasts. Pipeline-based scripts with retry mechanisms and deduplication. Supports Discord, email, and markdown templates.
+ version: "3.17.3"
+ homepage: https://github.com/tangwz/follow-news
 @@ -79,6 +79,68 @@ Use one of the following paths according to user intent:
     - When user reports errors, empty output, or stale data.
     - Run: config validation -> targeted 1h smoke fetch -> pipeline with verbose logs.
