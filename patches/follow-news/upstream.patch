@@ -2,7 +2,7 @@ diff --git a/SKILL.md b/SKILL.md
 index 70efac2..3c1153b 100644
 --- a/SKILL.md
 +++ b/SKILL.md
-@@ -79,6 +79,36 @@ Use one of the following paths according to user intent:
+@@ -79,6 +79,68 @@ Use one of the following paths according to user intent:
     - When user reports errors, empty output, or stale data.
     - Run: config validation -> targeted 1h smoke fetch -> pipeline with verbose logs.
  
@@ -35,6 +35,38 @@ index 70efac2..3c1153b 100644
 +     4. Phase 4: write the report using the 5-question Tier 1 template
 +   - **Do NOT skip phases 1-3.** Raw data has ~50-300 articles and is noisy without your filtering. Going directly to phase 4 produces a polluted report.
 +   - For Tier 1 events, quote 2-3 entries from `enriched_comments` (verbatim, with 👍 counts). If empty, write "本周暂无显著社区讨论" — do not fabricate.
++
++6. **Topic feedback search (single-topic community discussion lookup)**
++   - When user asks for community reaction to a SPECIFIC topic (named product / version / event)
++     AND does NOT use 周报 / weekly / 本周 / digest keywords.
++   - Trigger phrases: "社区反馈", "怎么看", "评价", "舆论", "在国外火吗",
++     "community feedback on X", "what do HN/Reddit think of X", "X 评价怎样"
++   - Disambiguation examples:
++     - ✓ Rule 6: "查一下 Cursor agent mode 的社区反馈"
++     - ✓ Rule 6: "DeepSeek V4 在国外评价怎样"
++     - ✓ Rule 5: "本周 AI 圈竞品监控周报"
++     - ✓ Rule 5: "what did the AI community say about Claude Sonnet 4.6 release this week"
++   - Agent extracts ONE core topic keyword from user's natural-language message before calling
++     (single brand / single version / single event; if user asks two topics, advise splitting).
++   - Execute:
++     ```bash
++     python3 scripts/topic-feedback.py \
++       --query "<keyword agent extracted>" \
++       --trendradar-dir <workspace>/upstream/TrendRadar \
++       --days 30 \
++       --output /tmp/topic-feedback.json \
++       --markdown /tmp/topic-feedback.md \
++       --enrich-hn-comments
++     ```
++   - Script does NO LLM work — only mechanical 4-source search (HN / Reddit / Twitter / TrendRadar CN)
++     with 10-min TTL cache. All semantic work (sentiment grouping, translation, report writing)
++     is YOUR job following `references/prompts/topic-feedback.md`.
++   - **CRITICAL — Read `references/prompts/topic-feedback.md` first** for output discipline:
++     Chinese throughout, source three-element rule, 👍 counts on every quote.
++   - On `no_results_hint != null` (all 4 sources returned 0): do NOT fabricate. Tell user the
++     query yielded nothing, quote the hint, suggest shorter / English / brand-only query.
++   - Twitter is best-effort: if `sources.twitter.status` starts with `"skipped: ..."`, this is a
++     known MVP limitation (opencli twitter search subcommand not yet available), not a bug.
 +
  Priority rule:
  - Operational/config queries take precedence over full news generation.

@@ -192,12 +192,14 @@ echo "▶ Step 6: 复制 follow-news 新脚本 + 提示词"
 cp "$SCRIPT_DIR/follow-news-addons/scripts/weekly-feedback.py" "$FOLLOW_NEWS_DIR/scripts/"
 cp "$SCRIPT_DIR/follow-news-addons/scripts/enrich_comments.py" "$FOLLOW_NEWS_DIR/scripts/"
 cp "$SCRIPT_DIR/follow-news-addons/scripts/llm-filter.py" "$FOLLOW_NEWS_DIR/scripts/"
+cp "$SCRIPT_DIR/follow-news-addons/scripts/topic-feedback.py" "$FOLLOW_NEWS_DIR/scripts/"
 # fetch-reddit / fetch-twitter 以 overlay 方式复制（替换上游同名文件）
 cp "$SCRIPT_DIR/follow-news-addons/scripts/fetch-reddit.py" "$FOLLOW_NEWS_DIR/scripts/"
 cp "$SCRIPT_DIR/follow-news-addons/scripts/fetch-twitter.py" "$FOLLOW_NEWS_DIR/scripts/"
 mkdir -p "$FOLLOW_NEWS_DIR/references/prompts"
 cp "$SCRIPT_DIR/follow-news-addons/references/prompts/competitor-monitor.md" "$FOLLOW_NEWS_DIR/references/prompts/"
-echo "  ✓ weekly-feedback.py, enrich_comments.py, llm-filter.py, fetch-reddit.py, fetch-twitter.py, competitor-monitor.md"
+cp "$SCRIPT_DIR/follow-news-addons/references/prompts/topic-feedback.md" "$FOLLOW_NEWS_DIR/references/prompts/"
+echo "  ✓ weekly-feedback.py, enrich_comments.py, llm-filter.py, topic-feedback.py, fetch-reddit.py, fetch-twitter.py, competitor-monitor.md, topic-feedback.md"
 
 # ─── Step 7: 写 workspace 配置（替换 TrendRadar 路径占位符）───
 echo ""
