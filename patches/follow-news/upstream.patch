@@ -78,6 +78,31 @@ index 70efac2..3c1153b 100644
  Priority rule:
  - Operational/config queries take precedence over full news generation.
  - When a source fails, keep the run result transparent: explicit success/failure source count and failure reason list.
+diff --git a/references/digest-prompt.md b/references/digest-prompt.md
+index 906fca3..f1e9c19 100644
+--- a/references/digest-prompt.md
++++ b/references/digest-prompt.md
+@@ -94,6 +94,20 @@ For KOL/Twitter fixed sections, always render the four metrics from `metrics.imp
+
+ Avoid unsupported significance words such as "major", "landmark", "strategic", "long-term impact", or "rare sober voice" unless the evidence explicitly supports that judgment. Prefer concrete facts and restrained reader impact.
+
++### Named Subject Discipline (CRITICAL)
++
++**Vague subject placeholders are forbidden in summaries.** Phrases like "某国产模型", "某厂商", "某 AI 公司", "a Chinese model", "some company", "an AI startup", "一家头部厂商" mean the summary failed — they hide the very fact a reader opened the digest to learn.
++
++When the article's title/snippet/summary does NOT explicitly name the subject (model name + version, company name, product name, person name), follow this fallback chain IN ORDER:
++
++1. **Cross-reference `all_sources`**: if `multi_source: true`, scan the other source titles/snippets for the same event — sibling sources from different outlets often name what the headline omitted. Use the most specific name found across the cluster.
++2. **Use `full_text` if present**: even when title is vague, `full_text` (when available) typically names the subject in the first paragraph.
++3. **If after (1) and (2) the subject is still unnamed**: do NOT fabricate, do NOT use placeholder pronouns. Either:
++   - Write a summary that honestly states the limitation: `"原文标题未点名具体模型/厂商，点击查看详情"` — keep the link, drop the false specificity, OR
++   - Drop the article from the section (lower its rank below the threshold) if a more specific competitor article covers the same event.
++
++The placeholder pronoun pattern ("某 X" / "some X") is a signal the data is too thin to write a confident summary. Honesty beats false specificity.
++
+ For non-chat templates, each article line must include its quality score using 🔥 prefix. Format: `🔥{score} | {summary with link}`. This makes scoring transparent and helps readers identify the most important news at a glance. For chat, use `[score/10]` in the title line from `references/templates/chat.md`.
+
+ ### Executive Summary
 diff --git a/scripts/fetch-github.py b/scripts/fetch-github.py
 index a31bb80..65d30ad 100755
 --- a/scripts/fetch-github.py
