@@ -192,10 +192,20 @@ def fetch_reddit_top_comments(url: str, max_count: int = 5) -> List[Dict]:
 
 # ─── Dispatch ────────────────────────────────────────────────────────────────
 
-def enrich_article_with_comments(article: Dict, max_per_source: int = 5) -> List[Dict]:
+def enrich_article_with_comments(
+    article: Dict,
+    max_per_source: int = 5,
+    used_story_ids: Optional[set] = None,
+) -> List[Dict]:
     """Inspect an article's url and reactions, fetch comments where possible.
 
     Returns a list of enriched comment dicts; also stores under article["enriched_comments"].
+
+    `used_story_ids`: optional set of HN story IDs already claimed by previous
+    enrichment calls in this run. The title-search fallback skips stories whose
+    ID is already in the set, preventing N article variants (e.g. multiple
+    release versions of the same project) from all collapsing onto the same
+    fuzzy-matched HN thread. The set is mutated in place.
     """
     enriched: List[Dict] = []
 
@@ -221,12 +231,19 @@ def enrich_article_with_comments(article: Dict, max_per_source: int = 5) -> List
         title = article.get("title", "") or ""
         story_id = find_hn_story_by_title(title)
         if story_id:
-            got = _fetch_hn_story_comments(story_id, max_per_source)
-            if got:
+            if used_story_ids is not None and story_id in used_story_ids:
                 logging.debug(
-                    f"enrich title-search hit: HN story {story_id} for '{title[:60]}'"
+                    f"enrich title-search skipped: HN story {story_id} already claimed (title='{title[:60]}')"
                 )
-                enriched.extend(got)
+            else:
+                got = _fetch_hn_story_comments(story_id, max_per_source)
+                if got:
+                    logging.debug(
+                        f"enrich title-search hit: HN story {story_id} for '{title[:60]}'"
+                    )
+                    enriched.extend(got)
+                    if used_story_ids is not None:
+                        used_story_ids.add(story_id)
 
     if enriched:
         article["enriched_comments"] = enriched

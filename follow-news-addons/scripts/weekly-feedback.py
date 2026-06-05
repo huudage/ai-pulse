@@ -356,6 +356,107 @@ def assign_tier(article: Dict[str, Any]) -> str:
     return "tier3"
 
 
+def _project_key(article: Dict[str, Any]) -> Optional[str]:
+    """Return a stable key identifying the underlying project for same-project
+    dedup. Returns None when no reliable key can be derived (article participates
+    as itself, no collapsing).
+
+    Strategy:
+    - GitHub releases: use `repo_full_name`, falling back to parsing the link
+      path (`/owner/repo/releases/tag/...` → `owner/repo`).
+    - Other sources: None (don't try to fuzzy-collapse non-GitHub announcements
+      — too easy to wrongly merge sibling launches from the same vendor).
+    """
+    if article.get("source_type") != "github":
+        return None
+    repo = article.get("repo_full_name") or ""
+    if repo:
+        return f"gh:{repo.lower()}"
+    link = article.get("link") or ""
+    m = re.search(r"github\.com/([^/]+/[^/]+)/", link)
+    if m:
+        return f"gh:{m.group(1).lower()}"
+    return None
+
+
+def dedup_same_project(
+    announcements: List[Dict[str, Any]],
+    logger: logging.Logger,
+) -> List[Dict[str, Any]]:
+    """Collapse multiple announcements from the same project into one canonical.
+
+    The pre-existing cross-day dedup operates on title/URL hash, so distinct
+    release versions of the same repo (openclaw v2026.5.28 / v2026.5.31-beta.4
+    / v2026.6.1) all survive as separate articles — and each grabs a Tier 1
+    slot, crowding out actually diverse events. Here we group by project key
+    and keep only the most recent release per project, merging signals (max
+    source_count, max quality_score, union of reactions) from collapsed
+    siblings.
+    """
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    standalone: List[Dict[str, Any]] = []
+    for a in announcements:
+        key = _project_key(a)
+        if key is None:
+            standalone.append(a)
+        else:
+            groups.setdefault(key, []).append(a)
+
+    collapsed: List[Dict[str, Any]] = []
+    for key, items in groups.items():
+        if len(items) == 1:
+            collapsed.append(items[0])
+            continue
+        # Pick canonical: most recent published_at, ties broken by quality_score
+        def _sort_key(a: Dict[str, Any]):
+            d = _parse_date(a.get("published_at") or a.get("date"))
+            return (d or datetime.min.replace(tzinfo=timezone.utc), a.get("quality_score", 0) or 0)
+        items.sort(key=_sort_key, reverse=True)
+        canonical = items[0]
+        siblings = items[1:]
+        # Merge signals from siblings into canonical
+        canonical["quality_score"] = max(
+            (it.get("quality_score", 0) or 0) for it in items
+        )
+        # Bump source_count by the count of collapsed siblings (each was a separate release post)
+        canonical["source_count"] = (canonical.get("source_count", 0) or 0) + len(siblings)
+        if len(items) >= 2:
+            canonical["multi_source"] = True
+        # Union reactions (dedup by URL)
+        all_reactions = list(canonical.get("reactions", []) or [])
+        seen_urls = {(r.get("link") or r.get("url") or "") for r in all_reactions}
+        for sib in siblings:
+            for r in sib.get("reactions", []) or []:
+                u = r.get("link") or r.get("url") or ""
+                if u and u not in seen_urls:
+                    all_reactions.append(r)
+                    seen_urls.add(u)
+        if all_reactions:
+            canonical["reactions"] = all_reactions
+        canonical["_collapsed_siblings"] = [
+            {"title": s.get("title", ""), "link": s.get("link", "")} for s in siblings
+        ]
+        # Mark siblings so they don't show up as orphan announcements in the
+        # downstream regrouped JSON. The agent's prompt only acts on entries
+        # whose _tier is tier1/2/3, so this keeps the report clean.
+        for s in siblings:
+            s["_classification"] = "dropped_sibling"
+            s["_tier"] = "dropped_sibling"
+            s["_collapsed_into"] = canonical.get("link") or canonical.get("title")
+        logger.debug(
+            f"Same-project dedup: collapsed {len(siblings)} siblings into '{canonical.get('title','')[:60]}' (key={key})"
+        )
+        collapsed.append(canonical)
+
+    result = standalone + collapsed
+    if len(result) < len(announcements):
+        logger.info(
+            f"Same-project dedup: {len(announcements)} → {len(result)} announcements "
+            f"(collapsed {len(announcements) - len(result)} sibling releases)"
+        )
+    return result
+
+
 def _parse_date(value: Any) -> Optional[datetime]:
     if not value:
         return None
@@ -727,10 +828,15 @@ def main() -> int:
         cls = classify_article(a)
         a["_classification"] = cls
         if cls == "announcement":
-            a["_tier"] = assign_tier(a)
             announcements.append(a)
         elif cls == "reaction":
             reactions.append(a)
+    # Collapse same-project sibling releases BEFORE tier assignment so a single
+    # project can't claim multiple Tier 1 slots with consecutive version bumps.
+    announcements = dedup_same_project(announcements, logger)
+    # Now assign tiers on the deduped set
+    for a in announcements:
+        a["_tier"] = assign_tier(a)
     tier_counts: Dict[str, int] = {}
     for ann in announcements:
         tier_counts[ann["_tier"]] = tier_counts.get(ann["_tier"], 0) + 1
@@ -748,8 +854,13 @@ def main() -> int:
         tier1_anns = [a for a in announcements if a.get("_tier") == "tier1"]
         logger.info(f"Enriching {len(tier1_anns)} Tier 1 announcements with HN/Reddit comments…")
         enriched_count = 0
+        # Shared set tracks HN story IDs claimed by the title-search fallback so
+        # different titles can't all collapse onto the same fuzzy-matched thread.
+        used_story_ids: set = set()
         for ann in tier1_anns:
-            got = enricher.enrich_article_with_comments(ann, max_per_source=5)
+            got = enricher.enrich_article_with_comments(
+                ann, max_per_source=5, used_story_ids=used_story_ids
+            )
             if got:
                 enriched_count += 1
                 logger.debug(
