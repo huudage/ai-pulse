@@ -30,7 +30,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 SCRIPTS_DIR = Path(__file__).parent
 
@@ -73,6 +73,50 @@ def collect_daily_files(archive_dir: Path, days: int) -> List[Path]:
             files.append((d, p))
     files.sort()
     return [p for _, p in files]
+
+
+DAILY_REPORT_PATTERN = re.compile(r"^daily-(\d{4}-\d{2}-\d{2})\.md$")
+
+
+def collect_daily_reports(archive_dir: Path, days: int, max_chars: int = 4000) -> List[Dict[str, Any]]:
+    """Find rendered daily markdown reports within the last N days.
+
+    Returns [{date, path, content}, ...] sorted oldest→newest. Each content is
+    truncated to max_chars to keep the weekly JSON small. Empty list when the
+    archive is missing or contains no in-window reports.
+
+    The agent uses these as supplementary context: when a daily already covered
+    an event, the weekly should focus on community-feedback angles the daily
+    didn't cover, instead of re-summarizing the news. When the list is empty,
+    the agent generates the weekly purely from the fetch corpus.
+    """
+    if not archive_dir or not archive_dir.is_dir():
+        return []
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+    found: List[Tuple[Any, Path]] = []
+    for p in archive_dir.iterdir():
+        if not p.is_file():
+            continue
+        m = DAILY_REPORT_PATTERN.match(p.name)
+        if not m:
+            continue
+        try:
+            d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d >= cutoff_date:
+            found.append((d, p))
+    found.sort()
+    out: List[Dict[str, Any]] = []
+    for d, p in found:
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n…[truncated]…"
+        out.append({"date": d.isoformat(), "path": str(p), "content": text})
+    return out
 
 
 def flatten_daily_json(daily_files: List[Path], logger: logging.Logger) -> List[Dict[str, Any]]:
@@ -757,7 +801,16 @@ def render_markdown(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate weekly AI tech announcement + community feedback digest from follow-news archive")
-    parser.add_argument("--archive-dir", type=Path, required=False, help="Workspace archive dir (parent of daily-json/) — used when --fetch-now is NOT set")
+    parser.add_argument(
+        "--archive-dir",
+        type=Path,
+        required=False,
+        help="Workspace archive dir. Two roles: (1) source for accumulated mode "
+             "(reads daily-json/<date>.json when --fetch-now is NOT set); "
+             "(2) supplementary context — when present in either mode, rendered "
+             "daily-*.md reports within --days are loaded into output JSON's "
+             "`daily_reports_context` for the agent to reference. Optional in fetch-now mode.",
+    )
     parser.add_argument("--days", type=int, default=7, help="Lookback window in days (default: 7)")
     parser.add_argument("--output", type=Path, default=Path("/tmp/td-weekly-merged.json"), help="Output JSON path (same schema as merge-sources)")
     parser.add_argument("--markdown", type=Path, default=None, help="Optional markdown digest output path")
@@ -871,6 +924,23 @@ def main() -> int:
     # Regroup into topics (same schema as merge-sources output)
     topics_grouped = regroup_by_topic(merged)
 
+    # Optional: pull rendered daily reports as supplementary context for the
+    # agent. Looks in --archive-dir (works in both fetch-now and accumulated
+    # modes — fetch-now mode previously ignored archive-dir; now it's used
+    # only for daily-report context, not as a data source). Empty list when
+    # --archive-dir is not provided or contains no in-window daily-*.md files.
+    daily_reports = collect_daily_reports(args.archive_dir, args.days) if args.archive_dir else []
+    if daily_reports:
+        logger.info(
+            f"Daily-report context: loaded {len(daily_reports)} reports "
+            f"({daily_reports[0]['date']} → {daily_reports[-1]['date']})"
+        )
+    else:
+        logger.info(
+            "Daily-report context: none available "
+            f"({'archive-dir not provided' if not args.archive_dir else f'no daily-*.md within {args.days}d under {args.archive_dir}'})"
+        )
+
     # Build output JSON
     output_data = {
         "generated": datetime.now(timezone.utc).isoformat(),
@@ -887,7 +957,9 @@ def main() -> int:
             ),
             "topics_count": len(topics_grouped),
             "topic_distribution": {tid: data["count"] for tid, data in topics_grouped.items()},
+            "daily_reports_available": len(daily_reports),
         },
+        "daily_reports_context": daily_reports,
         "topics": topics_grouped,
     }
 

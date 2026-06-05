@@ -9,7 +9,7 @@ index 70efac2..3c1153b 100644
  description: Generate tech news digests with unified source model, quality scoring, and multi-format output. Seven-source data collection from RSS feeds, Twitter/X KOLs, GitHub releases, GitHub Trending, Reddit, web search, and podcasts. Pipeline-based scripts with retry mechanisms and deduplication. Supports Discord, email, and markdown templates.
  version: "3.17.3"
  homepage: https://github.com/tangwz/follow-news
-@@ -79,6 +79,68 @@ Use one of the following paths according to user intent:
+@@ -79,6 +79,70 @@ Use one of the following paths according to user intent:
     - When user reports errors, empty output, or stale data.
     - Run: config validation -> targeted 1h smoke fetch -> pipeline with verbose logs.
  
@@ -20,15 +20,17 @@ index 70efac2..3c1153b 100644
 +     python3 scripts/weekly-feedback.py \
 +       --fetch-now \
 +       --trendradar-dir <path>/TrendRadar \
++       --archive-dir <workspace>/archive/follow-news \
 +       --days 7 \
 +       --output /tmp/td-weekly-merged.json \
 +       --markdown /tmp/td-weekly.md \
 +       --enrich-tier1
 +     ```
-+     - `--fetch-now` triggers fresh 7-day fetch (RSS / GitHub / Web search / Twitter via `run-pipeline.py --hours 168`, TrendRadar via SQLite 7-day export). No daily archive required.
++     - `--fetch-now` triggers fresh 7-day fetch (RSS / GitHub / Web search / Twitter via `run-pipeline.py --hours 168`, TrendRadar via SQLite 7-day export). No daily archive required as a data source.
++     - `--archive-dir` is **optional**: when present, any `daily-*.md` reports within --days are loaded into the output JSON's `daily_reports_context` so the agent can reference prior daily coverage. When absent (or when no daily files exist), the agent generates the weekly purely from the fresh fetch corpus. Either path works — pass `--archive-dir` whenever the workspace has a daily archive, omit otherwise.
 +     - `--enrich-tier1` invokes `enrich_comments.py` to fetch real HN / Reddit top comment text for Tier 1 announcements (zero-auth JSON APIs).
 +     - **No `--llm-filter`** — the script only does heuristic Tier pre-labeling and reactions pairing. **All LLM work (semantic dedup, announcement verification, dimension classification) is YOUR job (the agent's), done at report-writing time** following `references/prompts/competitor-monitor.md`'s "4 阶段" rules.
-+   - **Alternate — accumulated mode** (if daily archive exists for sources that can't lookback, e.g. Reddit):
++   - **Alternate — accumulated mode** (when daily-json archive exists for sources that can't lookback, e.g. Reddit):
 +     ```bash
 +     python3 scripts/weekly-feedback.py \
 +       --archive-dir <workspace>/archive/follow-news \

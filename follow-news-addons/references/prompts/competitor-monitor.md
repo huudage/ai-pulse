@@ -195,3 +195,17 @@
 - `enriched_comments: [{platform, content, author, likes, url}]` —— **本周报核心数据**：HN/Reddit 二次抓取的评论原文（仅 Tier 1 候选，可能为空）
 
 如果某事件 `enriched_comments` 和 `reactions` 都为空 → **不进正文，进附录或剔除**。绝不编造。
+
+## 日报上下文（可选输入）
+
+输出 JSON 的顶层可能包含 `daily_reports_context: [{date, path, content}, ...]`——这是本周窗口内已生成的日报 markdown。**这是可选输入**，按下列规则使用：
+
+- **当 `daily_reports_context` 非空**：日报已经把"本周谁发了什么"讲过一遍，读者再读到周报时**不需要重复事件背景**。你的工作变成：
+  1. 在挑选事件时，优先选**日报已点名但社区视角缺位**的事件——把日报留下的"是什么"用社区原话补完"大家怎么看"
+  2. 跨日期对照：如果某个事件在多个 daily 里都被提到（持续发酵），它就是本周延烧话题，应优先入选
+  3. 周报的"事件背景一句话"可以更紧——可以写"日报已述（YYYY-MM-DD）"+ 一行差量，把篇幅留给社区原话
+- **当 `daily_reports_context` 为空**：按原 4 阶段流程从 fetch corpus 单独生成，不做任何"日报对照"假设
+- **判别字段**：`output_stats.daily_reports_available > 0` 即非空。也可直接看 `daily_reports_context` 数组长度
+
+**纪律**：日报内容是上下文不是数据源——周报里**所有引用必须仍来自 enriched_comments / reactions**，不要把日报段落直接当社区原话引用。日报反映的是 agent 上次的总结视角，不是社区声音。
+
