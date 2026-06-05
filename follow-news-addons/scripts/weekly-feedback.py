@@ -264,6 +264,26 @@ TIER1_VENDOR_PATTERNS = [
 ]
 TIER1_VENDOR_RE = re.compile("|".join(TIER1_VENDOR_PATTERNS), re.IGNORECASE)
 
+# SDK / client-library release noise: GitHub auto-releases of language bindings
+# (openai-python, anthropic-sdk-python, langchain-anthropic, mem0 ts-v..., etc.)
+# match the Tier 1 vendor regex via brand name but are not product announcements
+# — no one discusses "openai-python v2.40.0" on HN/Reddit. Demote to tier3 so the
+# weekly feedback report stops wasting Tier-1 slots on package bumps.
+SDK_RELEASE_PATTERN = re.compile(
+    r"(?ix)"
+    r"(?:"
+    # Language/binding suffixes: -python, -js, -ts, -sdk, -cli, -core, -api, -client, -lib, -node
+    r"\b\S*-(?:python|js|ts|node|sdk|cli|core|api|client|lib|go|rust|java|dotnet|ruby)\b"
+    # OR PyPI release notation
+    r"|=="
+    # OR typescript-style "ts-v..." version prefix
+    r"|\bts-v\d"
+    # OR explicit "SDK" / "client library" mention in title
+    r"|\b(?:SDK|client\s+library|官方\s*SDK)\b"
+    r")"
+)
+
+
 CLICKBAIT_PATTERN = re.compile(
     r"震惊|刚刚！|太可怕|未来已来|颠覆了一切|碾压|爆款|逆天",
     re.IGNORECASE,
@@ -308,6 +328,12 @@ def assign_tier(article: Dict[str, Any]) -> str:
     # Clickbait / blacklist → drop entirely
     if CLICKBAIT_PATTERN.search(combined):
         return "tierX"
+
+    # SDK / client-library release: matched Tier 1 brand by name but is just a
+    # package version bump (openai-python, anthropic-sdk-python, langchain-*, etc.)
+    # No community discussion → don't waste a Tier 1 slot. Cap at tier3.
+    if SDK_RELEASE_PATTERN.search(title):
+        return "tier3"
 
     qs = article.get("quality_score", 0) or 0
     src_count = article.get("source_count", 0) or 0
