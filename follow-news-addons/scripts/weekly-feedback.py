@@ -156,6 +156,80 @@ def _flatten_merged_json(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return articles
 
 
+_TRENDRADAR_DB_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2})\.db$")
+
+
+def _collect_trendradar_status(trendradar_dir: Optional[Path], days: int) -> Dict[str, Any]:
+    """Inspect TrendRadar's SQLite archive and report freshness.
+
+    Surfaced in output_stats.trendradar_status so the agent can distinguish
+    "thin Chinese-community coverage this week" (legit) from "pipeline stale —
+    SQLite hasn't been written to in N months" (data infrastructure problem).
+    Without this, an agent looking at 0 TrendRadar hits has no way to tell
+    which is which, and may misattribute the gap.
+    """
+    if not trendradar_dir:
+        return {"available": False, "reason": "trendradar_dir_not_provided"}
+    td_path = Path(trendradar_dir)
+    if not td_path.is_dir():
+        return {"available": False, "reason": "trendradar_dir_missing", "path": str(td_path)}
+    news_dir = td_path / "output" / "news"
+    if not news_dir.is_dir():
+        return {"available": False, "reason": "output_news_dir_missing", "path": str(news_dir)}
+
+    dates: List[str] = []
+    for p in news_dir.iterdir():
+        if p.is_file():
+            m = _TRENDRADAR_DB_PATTERN.match(p.name)
+            if m:
+                dates.append(m.group(1))
+    if not dates:
+        return {"available": False, "reason": "no_sqlite_files", "path": str(news_dir)}
+
+    dates.sort()
+    latest_str = dates[-1]
+    try:
+        latest_date = datetime.strptime(latest_str, "%Y-%m-%d").date()
+    except ValueError:
+        return {"available": False, "reason": "bad_date_in_filename", "latest_raw": latest_str}
+
+    today = datetime.now(timezone.utc).date()
+    days_old = (today - latest_date).days
+    cutoff_date = today - timedelta(days=days)
+    in_window = sum(
+        1 for d in dates
+        if (datetime.strptime(d, "%Y-%m-%d").date() >= cutoff_date)
+    )
+    is_stale = days_old > days
+
+    if is_stale:
+        message = (
+            f"TrendRadar SQLite 最新数据停留在 {latest_str}（距今 {days_old} 天），"
+            f"超出本周 {days} 天窗口。中文热榜本周很可能取不到数据；"
+            "如报告中无 TrendRadar 命中，应归因为数据管道停摆，不是话题本身在中文社区缺乏讨论。"
+        )
+    elif in_window == 0:
+        message = (
+            f"TrendRadar SQLite 最新数据 {latest_str}（距今 {days_old} 天），"
+            f"窗口内无日档文件。可能脚本运行频率不足。"
+        )
+    else:
+        message = (
+            f"TrendRadar SQLite 数据更新到 {latest_str}（距今 {days_old} 天），"
+            f"窗口 {days} 天内共 {in_window} 个日档文件。"
+        )
+
+    return {
+        "available": True,
+        "latest_date": latest_str,
+        "days_old": days_old,
+        "in_window_file_count": in_window,
+        "total_file_count": len(dates),
+        "is_stale": is_stale,
+        "message": message,
+    }
+
+
 def fetch_now(args: argparse.Namespace, logger: logging.Logger, merge_mod) -> List[Dict[str, Any]]:
     """On-demand fresh 7-day fetch.
 
@@ -190,6 +264,22 @@ def fetch_now(args: argparse.Namespace, logger: logging.Logger, merge_mod) -> Li
             logger.info(f"Auto-detected TrendRadar at {trendradar_dir}")
 
     if trendradar_dir and trendradar_dir.is_dir():
+        # 先现场爬一次 TrendRadar，产出今天的快照 db（解除对 daily.sh 是否跑过的硬依赖）。
+        # 中文热榜是实时快照源，只能抓到「今天」；7 天厚度靠每日累积自然长出来。
+        logger.info("Running live TrendRadar crawl (python -m trendradar) for today's snapshot...")
+        crawl_env = child_env.copy()
+        crawl_env["DOCKER_CONTAINER"] = "true"  # 抑制 webbrowser.open 弹窗（见 __main__._should_open_browser）
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "trendradar"],
+                cwd=str(trendradar_dir),
+                check=False,
+                timeout=300,
+                env=crawl_env,
+            )
+        except Exception as e:
+            logger.warning(f"Live TrendRadar crawl failed: {e} (continuing; weekly_export will use whatever archive exists)")
+
         logger.info(f"Running TrendRadar weekly_export.py --days {args.days}...")
         try:
             subprocess.run(
@@ -514,6 +604,103 @@ def _parse_date(value: Any) -> Optional[datetime]:
         return None
 
 
+# ─── Anchor-based reaction pairing ──────────────────────────────────────────
+#
+# The previous heuristic paired reactions to announcements by counting normalized
+# title-token overlap (≥2 shared tokens). That misses any reaction that doesn't
+# happen to share two distinctive title words — e.g. a KOL tweet "claude 4.6
+# 写代码爽飞" carries plenty of community signal about the Anthropic announcement
+# but shares only "claude" with the title "Anthropic releases Claude Sonnet 4.6".
+#
+# Anchor cooccurrence (new): pull (brand, product, version) tokens from each
+# announcement and pair any reaction whose title+snippet mentions the primary
+# anchor, plus at least one secondary anchor when the primary is a common
+# vendor brand. Distinctive project names (openclaw / vllm / agno) need only
+# the primary anchor.
+
+_PAIR_BRAND_NOISE = {
+    "release", "releases", "released", "version", "the", "and", "or", "with",
+    "from", "for", "into", "onto", "blog", "post", "now", "new", "introducing",
+    "launches", "launched", "announcing", "announces", "this", "that",
+    "ai", "llm", "ml", "model", "models", "agent", "agents", "open", "source",
+    "tool", "tools", "framework", "library", "based", "github", "code",
+    "free", "weekly", "daily", "today", "tomorrow", "yesterday",
+    "how", "why", "what", "where", "when", "who", "your", "you", "are",
+}
+
+# Vendor brands too common to be a sole anchor — pairing requires ≥1 secondary
+# match because raw "openai" / "claude" appears in dozens of weekly articles.
+_PAIR_COMMON_VENDORS = {
+    "openai", "anthropic", "google", "deepmind", "meta", "microsoft", "nvidia",
+    "amazon", "aws", "apple", "xai", "mistral", "claude", "chatgpt", "gpt",
+    "gemini", "llama", "grok", "qwen", "deepseek", "kimi", "moonshot",
+    "minimax", "openclaw",  # openclaw appears too frequently in this corpus to anchor alone
+}
+
+
+def _announcement_anchors(article: Dict[str, Any]) -> List[str]:
+    """Extract distinctive anchor tokens from an announcement, most-specific first.
+
+    Order: GitHub repo name (if present) → title alphanumeric tokens →
+    version-shaped tokens. Tokens are lowercased. Used by `pair_reactions` for
+    brand-cooccurrence matching.
+    """
+    anchors: List[str] = []
+    seen: set = set()
+
+    link = (article.get("link") or "").lower()
+    m = re.search(r"github\.com/([\w\.\-]+)/([\w\.\-]+)(?:/|$)", link)
+    if m:
+        repo = m.group(2).strip(".-").lower()
+        if repo and len(repo) >= 3 and repo not in _PAIR_BRAND_NOISE:
+            anchors.append(repo)
+            seen.add(repo)
+
+    title = article.get("title") or ""
+    title = re.sub(r"^[\w\.\-]+/[\w\.\-]+:\s*", "", title)
+    raw = re.sub(r"[^\w\s\-]", " ", title).lower()
+
+    for tok_raw in raw.split():
+        tok = tok_raw.strip(".-").lower()
+        if not tok or tok in seen:
+            continue
+        # Keep version tokens — they're highly distinctive secondary anchors
+        if re.match(r"^v?\d+([\.\-]\d+)+[\w\-]*$", tok):
+            anchors.append(tok)
+            seen.add(tok)
+            continue
+        if tok in _PAIR_BRAND_NOISE or len(tok) < 3:
+            continue
+        anchors.append(tok)
+        seen.add(tok)
+        if len(anchors) >= 6:
+            break
+
+    return anchors[:6]
+
+
+def _reaction_matches_anchors(reaction: Dict[str, Any], anchors: List[str]) -> bool:
+    """Whether a reaction's title+snippet discusses the announcement.
+
+    Rule: primary anchor must appear; if primary is a common vendor brand, at
+    least one secondary anchor must also appear.
+    """
+    if not anchors:
+        return False
+    text = (
+        (reaction.get("title") or "") + " " +
+        (reaction.get("snippet") or reaction.get("summary") or "")
+    ).lower()
+    if not text.strip():
+        return False
+    primary = anchors[0]
+    if primary not in text:
+        return False
+    if primary in _PAIR_COMMON_VENDORS:
+        return any(a in text for a in anchors[1:])
+    return True
+
+
 def pair_reactions(
     announcements: List[Dict[str, Any]],
     reactions: List[Dict[str, Any]],
@@ -521,43 +708,66 @@ def pair_reactions(
     logger: logging.Logger,
     max_reactions_per_announcement: int = 5,
 ) -> None:
-    """Mutates announcements: attach a 'reactions' list to each based on title overlap + topic match."""
-    # Bucket reactions by normalized title for O(1) lookup; also keep flat list for fuzzy matches.
-    norm_buckets: Dict[str, List[Dict[str, Any]]] = {}
-    for r in reactions:
-        nt = normalize_title(r.get("title", ""))
-        norm_buckets.setdefault(nt, []).append(r)
+    """Mutates announcements: attach a 'reactions' list to each.
 
+    Two-stage matching:
+      1) Anchor cooccurrence — primary signal. Reaction text must mention the
+         announcement's primary anchor (project repo name / first non-noise
+         title token), plus a secondary anchor when the primary is a common
+         vendor brand (Anthropic / OpenAI / Claude / etc.).
+      2) Token-overlap fallback — kept as safety net for cases where anchor
+         extraction underspecifies (e.g. paper titles where the brand isn't
+         lexically prominent). Same ≥2 shared significant-tokens rule as before.
+
+    Time filter: drop reactions dated >12h BEFORE the announcement (stale).
+    Topic filter dropped: cross-topic reactions (a KOL tweet about an
+    ai-agent announcement) are exactly what the community-feedback report
+    wants to surface.
+    """
     for ann in announcements:
+        ann_anchors = _announcement_anchors(ann)
         ann_norm = normalize_title(ann.get("title", ""))
-        ann_topic = ann.get("primary_topic")
         ann_date = _parse_date(ann.get("date"))
 
-        # 1) Exact normalized-title bucket hits
-        candidates = list(norm_buckets.get(ann_norm, []))
+        candidates: List[Dict[str, Any]] = []
+        seen_keys: set = set()
 
-        # 2) Token overlap fallback: any reaction sharing 2+ significant tokens
+        def _key(r: Dict[str, Any]) -> str:
+            return r.get("link") or r.get("url") or r.get("title", "")
+
+        # 1) Anchor cooccurrence
+        if ann_anchors:
+            for r in reactions:
+                if _reaction_matches_anchors(r, ann_anchors):
+                    k = _key(r)
+                    if k and k not in seen_keys:
+                        candidates.append(r)
+                        seen_keys.add(k)
+
+        # 2) Token-overlap fallback
         ann_tokens = set(t for t in ann_norm.split() if len(t) > 2)
         if ann_tokens:
             for r in reactions:
-                if r in candidates:
+                k = _key(r)
+                if k in seen_keys:
                     continue
-                r_tokens = set(t for t in normalize_title(r.get("title", "")).split() if len(t) > 2)
+                r_tokens = set(
+                    t for t in normalize_title(r.get("title", "")).split() if len(t) > 2
+                )
                 if len(ann_tokens & r_tokens) >= 2:
                     candidates.append(r)
+                    seen_keys.add(k)
 
-        # Filter by topic + time-after-announcement
-        filtered = []
+        # Time filter
+        filtered: List[Dict[str, Any]] = []
         for r in candidates:
-            if ann_topic and r.get("primary_topic") and r["primary_topic"] != ann_topic:
-                continue
             r_date = _parse_date(r.get("date"))
             if ann_date and r_date and r_date < ann_date - timedelta(hours=12):
                 continue
             filtered.append(r)
 
         # Sort by quality_score desc, then engagement
-        def _react_key(r):
+        def _react_key(r: Dict[str, Any]):
             metrics = r.get("metrics") or {}
             engagement = (
                 metrics.get("like_count", 0)
@@ -569,7 +779,10 @@ def pair_reactions(
         filtered.sort(key=_react_key, reverse=True)
         if filtered:
             ann["reactions"] = filtered[:max_reactions_per_announcement]
-            logger.debug(f"Paired {len(ann['reactions'])} reactions → '{ann.get('title','')[:60]}'")
+            logger.debug(
+                f"Paired {len(ann['reactions'])} reactions → "
+                f"'{ann.get('title','')[:60]}' (anchors={ann_anchors[:3]})"
+            )
 
 
 def regroup_by_topic(articles: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -816,9 +1029,12 @@ def main() -> int:
     parser.add_argument("--markdown", type=Path, default=None, help="Optional markdown digest output path")
     parser.add_argument("--max-reactions", type=int, default=5, help="Max reactions per announcement (default: 5)")
     parser.add_argument(
-        "--enrich-tier1",
-        action="store_true",
-        help="For Tier 1 announcements, fetch top community comments from HN/Reddit via zero-auth JSON APIs and attach as enriched_comments[]",
+        "--enrich-tiers",
+        type=str,
+        default="tier1,tier2",
+        help="Comma-separated tier names (tier1,tier2,tier3) whose announcements get "
+             "HN/Reddit top-comment enrichment via zero-auth JSON APIs. "
+             "Default 'tier1,tier2'. Pass empty string to disable.",
     )
     parser.add_argument(
         "--fetch-now",
@@ -900,26 +1116,35 @@ def main() -> int:
     # Pair reactions under announcements
     pair_reactions(announcements, reactions, merge_mod.normalize_title, logger, args.max_reactions)
 
-    # Optionally enrich Tier 1 with real HN/Reddit comment text
-    if args.enrich_tier1:
+    # Optionally enrich announcements (default: tier1+tier2) with real HN/Reddit comment text
+    enrich_tiers = {t.strip() for t in (args.enrich_tiers or "").split(",") if t.strip()}
+    enriched_per_tier: Dict[str, int] = {}
+    if enrich_tiers:
         from importlib.machinery import SourceFileLoader
         enricher = SourceFileLoader("enrich_comments", str(SCRIPTS_DIR / "enrich_comments.py")).load_module()
-        tier1_anns = [a for a in announcements if a.get("_tier") == "tier1"]
-        logger.info(f"Enriching {len(tier1_anns)} Tier 1 announcements with HN/Reddit comments…")
-        enriched_count = 0
+        target_anns = [a for a in announcements if a.get("_tier") in enrich_tiers]
+        logger.info(
+            f"Enriching {len(target_anns)} announcements (tiers={sorted(enrich_tiers)}) "
+            "with HN/Reddit comments…"
+        )
         # Shared set tracks HN story IDs claimed by the title-search fallback so
         # different titles can't all collapse onto the same fuzzy-matched thread.
         used_story_ids: set = set()
-        for ann in tier1_anns:
+        for ann in target_anns:
             got = enricher.enrich_article_with_comments(
-                ann, max_per_source=5, used_story_ids=used_story_ids
+                ann, max_per_source=5, used_story_ids=used_story_ids, days_window=args.days
             )
             if got:
-                enriched_count += 1
+                t = ann.get("_tier", "unknown")
+                enriched_per_tier[t] = enriched_per_tier.get(t, 0) + 1
                 logger.debug(
-                    f"  ✚ {len(got)} comments → '{ann.get('title','')[:60]}'"
+                    f"  ✚ {len(got)} comments → [{ann.get('_tier')}] '{ann.get('title','')[:60]}'"
                 )
-        logger.info(f"Enrichment: attached comments to {enriched_count}/{len(tier1_anns)} Tier 1 articles")
+        total_enriched = sum(enriched_per_tier.values())
+        logger.info(
+            f"Enrichment: attached comments to {total_enriched}/{len(target_anns)} announcements "
+            f"({enriched_per_tier})"
+        )
 
     # Regroup into topics (same schema as merge-sources output)
     topics_grouped = regroup_by_topic(merged)
@@ -952,12 +1177,12 @@ def main() -> int:
             "announcements_count": len(announcements),
             "reactions_count": len(reactions),
             "tier_distribution": tier_counts,
-            "tier1_with_enriched_comments": sum(
-                1 for a in announcements if a.get("_tier") == "tier1" and a.get("enriched_comments")
-            ),
+            "enriched_tiers_requested": sorted(enrich_tiers) if enrich_tiers else [],
+            "enriched_by_tier": enriched_per_tier,
             "topics_count": len(topics_grouped),
             "topic_distribution": {tid: data["count"] for tid, data in topics_grouped.items()},
             "daily_reports_available": len(daily_reports),
+            "trendradar_status": _collect_trendradar_status(args.trendradar_dir, args.days),
         },
         "daily_reports_context": daily_reports,
         "topics": topics_grouped,

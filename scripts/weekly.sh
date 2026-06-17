@@ -74,7 +74,7 @@ fi
     --days "$DAYS" \
     --output "$OUTPUT" \
     --markdown "$MARKDOWN" \
-    --enrich-tier1 \
+    --enrich-tiers tier1 \
     --verbose
 
 echo ""

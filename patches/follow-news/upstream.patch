@@ -24,26 +24,26 @@ index 70efac2..3c1153b 100644
 +       --days 7 \
 +       --output /tmp/td-weekly-merged.json \
 +       --markdown /tmp/td-weekly.md \
-+       --enrich-tier1
++       --enrich-tiers tier1,tier2
 +     ```
 +     - `--fetch-now` triggers fresh 7-day fetch (RSS / GitHub / Web search / Twitter via `run-pipeline.py --hours 168`, TrendRadar via SQLite 7-day export). No daily archive required as a data source.
 +     - `--archive-dir` is **optional**: when present, any `daily-*.md` reports within --days are loaded into the output JSON's `daily_reports_context` so the agent can reference prior daily coverage. When absent (or when no daily files exist), the agent generates the weekly purely from the fresh fetch corpus. Either path works — pass `--archive-dir` whenever the workspace has a daily archive, omit otherwise.
-+     - `--enrich-tier1` invokes `enrich_comments.py` to fetch real HN / Reddit top comment text for Tier 1 announcements (zero-auth JSON APIs).
++     - `--enrich-tiers tier1,tier2` invokes `enrich_comments.py` to fetch real HN / Reddit top comment text for the listed tiers' announcements (zero-auth JSON APIs). Default if omitted is already `tier1,tier2`; pass empty string to disable.
 +     - **No `--llm-filter`** — the script only does heuristic Tier pre-labeling and reactions pairing. **All LLM work (semantic dedup, announcement verification, dimension classification) is YOUR job (the agent's), done at report-writing time** following `references/prompts/competitor-monitor.md`'s "4 阶段" rules.
 +   - **Alternate — accumulated mode** (when daily-json archive exists for sources that can't lookback, e.g. Reddit):
 +     ```bash
 +     python3 scripts/weekly-feedback.py \
 +       --archive-dir <workspace>/archive/follow-news \
-+       --days 7 --enrich-tier1
++       --days 7 --enrich-tiers tier1,tier2
 +     ```
 +   - Then read the structured weekly JSON via `scripts/summarize-merged.py --input /tmp/td-weekly-merged.json --top 60` (use `--top 60` since data is unfiltered and you need to see all Tier 1/2 candidates).
 +   - **CRITICAL — Read `references/prompts/competitor-monitor.md` first and follow its "4 阶段" rules strictly:**
 +     1. Phase 1: semantic dedup — cluster articles describing the same event
-+     2. Phase 2: announcement verification — drop noise (commentary, papers, minor updates)
-+     3. Phase 3: dimension classification + Tier 复议 (revise `_tier` heuristic if needed)
-+     4. Phase 4: write the report using the 5-question Tier 1 template
++     2. Phase 2: 社区讨论量评估 (hard filter) — apply the ⚠️ 入选门槛 in competitor-monitor.md; events with 0 community signal go to appendix or get dropped (this is a community-feedback weekly, NOT a news weekly)
++     3. Phase 3: 情绪分组 — bucket each event's `enriched_comments` + `reactions` into 👍 / 👎 / ⚖️ / 🇨🇳
++     4. Phase 4: write the community-feedback report — each event gets ONE-sentence background then quoted comments grouped by sentiment, plus the mandatory `🌐 跨事件社区反馈大章` cross-event chapter (30–40% of total length). **NOT** a news-style 5-question template; **NOT** Tier-based ranking.
 +   - **Do NOT skip phases 1-3.** Raw data has ~50-300 articles and is noisy without your filtering. Going directly to phase 4 produces a polluted report.
-+   - For Tier 1 events, quote 2-3 entries from `enriched_comments` (verbatim, with 👍 counts). If empty, write "本周暂无显著社区讨论" — do not fabricate.
++   - Quote verbatim from `enriched_comments` / `reactions` with 👍 counts. If both are empty for an event, write "本周暂无显著社区讨论" or move the event to the appendix — do not fabricate.
 +
 +6. **Topic feedback search (single-topic community discussion lookup)**
 +   - When user asks for community reaction to a SPECIFIC topic (named product / version / event)
