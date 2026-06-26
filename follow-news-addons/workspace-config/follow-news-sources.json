@@ -1,5 +1,5 @@
 {
-  "_comment": "AI Pulse 自定义信源 — install.sh 会替换占位符 <TRENDRADAR_PATH>。Twitter API 因 X 反爬已停用所有公共抓取（rsshub/nitter/RSS-bridge 全部要么死要么 Cloudflare 反爬），改用 KOL 个人博客 RSS（深度内容反而比推文质量更高）。",
+  "_comment": "AI Pulse 自定义信源 — setup.sh 会把占位符 <TRENDRADAR_PATH> 替换为克隆机上仓内 trendradar/ 的绝对路径（file:// 需绝对路径），解析后的副本落 follow-news-addons/workspace/config/。Twitter API 因 X 反爬已停用所有公共抓取（rsshub/nitter/RSS-bridge 全部要么死要么 Cloudflare 反爬），改用 KOL 个人博客 RSS（深度内容反而比推文质量更高）。",
   "sources": [
     {
       "id": "trendradar-cn-ai",

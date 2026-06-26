@@ -12,88 +12,69 @@ follow-news **不内置 LLM 调用**——所有自然语言由 OpenClaw 的 age
 
 ### 1. 角色定位先于规则
 
-文档第一段就明确："你是资深 AI 行业分析师，不是新闻播报员。读者已经看过了日报。" 这是为了把 agent 的行为从"信息搬运工"扭转为"分析师"。否则它会倾向于复述。
+文档第一段就明确："你是社区情报分析员，不是新闻播报员。周报独立成篇、不依赖日报，要的是社区在吵什么而非谁发了什么。" 这是为了把 agent 的行为从"信息搬运工"扭转为"分析师"。否则它会倾向于复述。
 
-### 2. 分级而不是排序
+### 2. 互动热度驱动选题（不是厂商门槛）
 
-"Top 10" 之类排序对 agent 很难，因为它需要全局比较，而上下文有限。**分桶（Tier 1/2/3/X）** 是更稳定的指令，每个桶都有明确判定规则。
+周报的入选与排序唯一依据是**社区互动热度**，由 `weekly-feedback.py` 的 `engagement_score()` 算出，存进 `_engagement`：
 
-### 3. 启发式预标签 + LLM 复议
+- **HN**：`log1p(points) + 1.5*log1p(num_comments)`
+- **TrendRadar 中文热榜**：`max(0,30-rank)/10 + log1p(crawl_count)`
+- **多源覆盖**：`+ 1.2*log1p(source_count)`
+- **厂商正则**：命中 `TIER1_VENDOR_RE` 只作 `×1.25` 加成（**不再是门槛**）
+- **降权**：clickbait `-1`；SDK 版本号 bump `×0.3`
 
-`weekly-feedback.py` 给每条 announcement 打 `_tier`（基于厂商正则白名单），agent **可以复议**，但需要给理由。这样：
-- 大多数情况下脚本已经给对了，agent 不需要重新判断
-- 少数边缘案例由 agent 提供智能补救
-- 复议必须给理由 → 避免 agent 任意改动
+log-damped 加性归一让不同源可比，避免单一巨量值碾压。**社区讨论量是硬门槛**：哪怕事件多重磅，社区零讨论就不上周报正文（最多进末尾"本周冷清的大新闻"附录）。
 
-### 4. 五问模板强制深度
+### 3. 讨论类文章是一等舆论
 
-Tier 1 事件必须回答 5 个问题：
-1. 是什么
-2. 为什么重要（差异点）
-3. 技术亮点
-4. 竞品对照（具体到产品名）
-5. 社区反响（引原文+👍数）
+`classify_article` 把 HN/Lobsters/TrendRadar 这类讨论源判为 `discussion`，其**标题 + 正文本身**进入候选池参与热度排序，而不是只作某条公告的陪衬。`_tier` 启发式预标签仍保留，但**仅作参考提示**，不决定入选——真正的排序键是 `_engagement`。
 
-这五问是反"水文"用的——agent 总有冲动写"重磅发布、行业瞩目"，五问强制它落到具体技术决策上。
+### 4. 社区情绪分组，强制落到原文
+
+周报正文按情绪分组（👍 正面 / 👎 负面 / ⚖️ 争议 / 🇨🇳 中文视角），事件背景只占 1 句话，其余全是**社区原文逐字引用 + 👍 数**。这是反"水文"用的——agent 总有冲动写"重磅发布、行业瞩目"，强制引用具体评论才能落到社区真实声音上。
 
 ### 5. 引用纪律
 
-第 5 题"社区反响"明确：**只引用 `enriched_comments` 里的原文，不要编造**。这是关键——agent 如果脑补"社区可能会说..."，整份报告就废了。`enriched_comments` 是 HN/Reddit 实抓数据，引用必须 verbatim + 带 👍 数。
+引用**只能来自 `enriched_comments` / `floating_threads` 里的原文，不要编造**。这是关键——agent 如果脑补"社区可能会说..."，整份报告就废了。这些字段是 HN/V2EX 实抓数据，引用必须 verbatim + 带 👍 数 + 真实链接（数据里的 `url`/`link` 原值）。
 
-### 6. 不要做的事
+### 6. 跨事件社区反馈大章（floating_threads）
 
-文档专门有一节"不要做的事"，列出 4 条反模式：
-- 不要把日报里的事再重复一遍
-- Tier 1 不超过 7 件
-- Tier 3 就是标题列表，不要展开
-- 不知道就说不知道（标记低置信度）
+🌐 大章不是"浮空感受"，而是**高互动但未配到任何公告的独立讨论串**：`pair_reactions` 没挂上的高热 thread 单列出来，每条带具体标题 + 真实 URL + points/score/comments 计数 + 2-3 条逐字评论。这回答了"不针对事件你反馈的到底是什么"——它针对的就是这些独立热议串本身。
 
-这些是高频陷阱，明确写出来 agent 才不会犯。
+### 7. 不要做的事
 
----
+文档专门有一节"不要做的事"，列出高频反模式：
 
-## 三维度分类的取舍
-
-| 维度 | 包含什么 | 不包含什么 |
-|---|---|---|
-| **模型** | 基础模型版本号迭代、推理模型、新模态 | 模型应用、模型评测综述 |
-| **工程架构** | 协议（MCP）、训练/推理框架、Agent 框架开源 | 业务集成、单个 RAG 项目 |
-| **Agent 产品** | 旗舰 Agent 产品的能力质变（Cursor 加 agent 模式）| 小功能升级（Cursor 加个快捷键）|
-
-**关键判定**：能不能"质变"看是否影响其他产品。Cursor 加 agent 模式 → Cline / Aider 要跟进 → 这是质变。Cursor 改 UI 配色 → 无人跟 → 不是质变。
+- 不要走新闻 5 问模板复述"谁发了什么"，事件背景只占 1 句话
+- 不要给事件评 Tier——这是讨论量驱动周报，差异只在讨论规模和情绪基调
+- 社区零讨论的大新闻进附录，不展开
+- 不知道就说不知道（标记低置信度），绝不编造评论/链接
 
 ---
 
-## Tier 1 厂商白名单的更新策略
+## 厂商正则的更新策略
 
-白名单**写死**在两处：
-1. `scripts/weekly-feedback.py` 的 `TIER1_VENDOR_PATTERNS` —— 用 regex 匹配标题+源名
-2. `references/prompts/competitor-monitor.md` —— 用文字列表给 agent 看
+厂商正则 `TIER1_VENDOR_RE` 仍写在 `scripts/weekly-feedback.py`，但角色已从"Tier 门槛"降级为"`×1.25` 热度加成"——大厂发布在同等讨论量下略占优，但**不再压制高热社区话题**。
 
-**更新触发条件**：
-- 新厂商首次发主流产品（如有个新独角兽崛起）
-- 旧厂商不再活跃（移到 Tier 2）
-- 你的关注重心变化
-
-**更新流程**：
-1. 在 `TIER1_VENDOR_PATTERNS` 加/删正则
-2. 在 `competitor-monitor.md` 的 "Tier 1 评级规则"段同步加/删文字
-3. **跑一次合成数据测试**，验证 `_tier` 启发式打标符合预期
+**更新触发**：新厂商崛起 / 旧厂商不再活跃 / 关注重心变化。
+**更新流程**：改 `TIER1_VENDOR_RE` 正则 → 跑一次合成数据测试，验证 `_engagement` 排序符合预期（不再需要同步文字白名单，因为 agent 不再据厂商名分级）。
 
 ---
 
 ## OpenClaw agent 怎么读这份文档
 
-在 [SKILL.md 路由规则 5](../follow-news-addons/PATCHES.md) 里写明：
+在 `skills/ai-pulse-weekly/SKILL.md` 里写明：
 
 > **CRITICAL — Read `references/prompts/competitor-monitor.md` first and follow it strictly when writing the natural-language report.**
 
 agent 按 OpenClaw 框架的设计会：
+
 1. 看到用户问"周报"
-2. 匹配 SKILL.md 路由 5
-3. 执行命令行（weekly-feedback.py --enrich-tier1）
-4. 读结果 JSON + competitor-monitor.md 模板
-5. 按模板严格输出
+2. 匹配 ai-pulse-weekly skill 路由
+3. 执行 `weekly.sh`（内部 `weekly-feedback.py --fetch-now --enrich-top 20`）
+4. 读结果 JSON（候选已按 `_engagement` 降序，含 `floating_threads`）+ competitor-monitor.md 模板
+5. 按模板严格输出（情绪分组 + 跨事件大章）
 
 **这里的关键**：SKILL.md 是路由说明，competitor-monitor.md 是行为说明，两者**互相引用**，缺一不可。
 
@@ -102,16 +83,17 @@ agent 按 OpenClaw 框架的设计会：
 ## 调优经验
 
 第一次使用时，你可能会发现：
-- Tier 1 太多（5 条以上）→ 调高 `_tier` 的 quality_score 阈值（脚本里 22 → 25）
-- Tier 1 太少 → 在 `TIER1_VENDOR_PATTERNS` 加更多正则
-- 社区原文不准 → 检查 `enriched_comments` 数据，可能 URL 不对应 / 评论被删
-- 报告太长 → 在 prompt 里加"严格限制 Tier 1 不超过 5 件，超出的下调到 Tier 2"
+
+- 正文太长 → 调高 `--enrich-top`/正文入选的 `_engagement` 阈值，或在 prompt 里限制每个情绪组的条数
+- 大厂公告淹没社区话题 → 检查 `×1.25` 加成是否偏高，或确认社区讨论量门槛是否生效
+- 社区原文不准 → 检查 `enriched_comments`/`floating_threads` 数据，可能 URL 不对应 / 评论被删
+- 中文社区段偏薄 → 挂 `daily.sh` 累积 TrendRadar 7 天快照厚度
 
 ---
 
 ## 后续可扩展
 
-- **加 V2EX / 知乎中文社区评论抓取**：扩 `enrich_comments.py`（需 V2EX/知乎 API 支持）
-- **加历史回溯**："上周这个 Tier 1 事件现在回看怎么样" → 翻 archive 找老的 daily-json
-- **加趋势对比**：把本周 Tier 1 厂商分布画成图（matplotlib），追踪某厂商发布密度
+- **中文评论正文补全**：V2EX 已零鉴权实抓（`enrich_comments.py` 的 `find_v2ex_topic_by_brand` + `fetch_v2ex_comments`）；知乎/B站为 cred-gated stub，补 cookie 后可启用
+- **加历史回溯**："上周这个热议事件现在回看怎么样" → 翻 archive 找老的 daily-json
+- **加趋势对比**：把本周高热话题的 `_engagement` 分布画成图，追踪某话题的讨论密度变化
 - **加 RSS 输出**：把周报 markdown 转 RSS，给其他订阅者用

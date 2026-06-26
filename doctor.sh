@@ -110,11 +110,11 @@ fi
 
 # ───────────────────────────────────────────
 echo ""
-echo "▶ 代理 (按需，国内访问 reddit/github/twitter)"
+echo "▶ 代理 (按需，国内访问 github/twitter)"
 if [ -n "$HTTPS_PROXY" ] || [ -n "$HTTP_PROXY" ]; then
     ok "代理已配置: ${HTTPS_PROXY:-$HTTP_PROXY}"
 else
-    echo "  (未配置 — 如果国内访问 reddit/github 慢，可在 .env 设 HTTPS_PROXY)"
+    echo "  (未配置 — 如果国内访问 github 慢，可在 .env 设 HTTPS_PROXY)"
 fi
 
 # ───────────────────────────────────────────

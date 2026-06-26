@@ -3,7 +3,7 @@
 Comment enrichment helper for follow-news weekly digest.
 
 For Tier 1 announcements' related reactions, fetch top community comments from
-HN and Reddit (both zero-auth JSON APIs) so the weekly report can quote real
+HN and V2EX (both zero-auth JSON APIs) so the weekly report can quote real
 community discussion text instead of just headlines.
 
 This is a *library*, not a standalone script — imported by weekly-feedback.py.
@@ -112,7 +112,37 @@ _BRAND_NOISE_WORDS = {
     "ai", "llm", "tool", "tools", "framework", "library", "based",
     "free", "weekly", "daily", "today", "tomorrow", "yesterday",
     "how", "why", "what", "where", "when", "who", "your", "you", "are",
+    # Generic English words that surface from title-token fallback and match
+    # unrelated high-points HN stories (the source of mis-attributed comments).
+    "says", "say", "said", "former", "official", "officially", "companies",
+    "company", "have", "has", "had", "try", "tries", "together", "application",
+    "applications", "expanding", "expand", "designed", "design", "takes", "take",
+    "use", "uses", "using", "get", "gets", "make", "makes", "want", "wants",
+    "help", "helps", "build", "builds", "building", "built", "over", "past",
+    "here", "there", "more", "most", "very", "much", "just", "like", "also",
+    "been", "being", "them", "they", "their", "our", "its", "first", "data",
+    "about", "after", "before", "will", "would", "should", "could", "can",
+    "not", "but", "all", "any", "out", "off", "via", "per", "than", "then",
 }
+
+
+def _significant_tokens(text: str) -> set:
+    """Lowercased content tokens (len>=3, not noise, not version-shaped).
+
+    Used for title↔title overlap relevance checks: a brand-search / title-fuzzy
+    HN hit is only accepted if its title shares enough significant tokens with
+    the source article, so a generic keyword can't drag in an unrelated thread.
+    """
+    toks: set = set()
+    raw = re.sub(r"[^\w\s\-]", " ", text or "")
+    for t in raw.split():
+        t = t.strip(".-").lower()
+        if len(t) < 3 or t in _BRAND_NOISE_WORDS:
+            continue
+        if re.match(r"^v?\d+([\.\-]\d+)*[\w\-]*$", t):
+            continue
+        toks.add(t)
+    return toks
 
 
 def _strip_title_for_search(title: str) -> str:
@@ -174,13 +204,22 @@ def _extract_brand_terms(article: Dict, limit: int = 3) -> List[str]:
 
 
 def find_hn_story_by_brand(
-    brand: str, since_epoch: int, min_points: int = 3
+    brand: str, since_epoch: int, min_points: int = 3,
+    source_title: Optional[str] = None, min_overlap: int = 2,
 ) -> Optional[str]:
     """Search HN Algolia for stories matching `brand` since `since_epoch` (unix).
 
     Returns the highest-points story_id from hits with >= min_points, or None.
     Used by enrich's brand-search fallback when an announcement has no direct
     HN link and `_extract_brand_terms` identified a distinctive project token.
+
+    Relevance guard (mirrors `find_v2ex_topic_by_brand`): when `source_title` is
+    given, a hit is only accepted if its title shares >= `min_overlap` significant
+    tokens with the source article. Without this, a generic keyword like "former"
+    matches the single highest-points story containing that word (e.g. an unrelated
+    Greenspan thread) and drags in mis-attributed comments. Requiring brand + at
+    least one more shared token keeps precision high (better no comments than wrong
+    comments).
     """
     if not brand or len(brand) < 3:
         return None
@@ -196,14 +235,23 @@ def find_hn_story_by_brand(
     if not hits:
         return None
     hits.sort(key=lambda h: h.get("points") or 0, reverse=True)
+    if source_title:
+        src_tokens = _significant_tokens(source_title)
+        for h in hits:
+            title = h.get("title") or h.get("story_title") or ""
+            if len(_significant_tokens(title) & src_tokens) >= min_overlap:
+                return str(h["objectID"])
+        return None
     return str(hits[0]["objectID"])
 
 
-def find_hn_story_by_title(title: str, min_points: int = 5) -> Optional[str]:
+def find_hn_story_by_title(title: str, min_points: int = 5, min_overlap: int = 2) -> Optional[str]:
     """Return the HN story id whose title best matches `title`.
 
     Algolia's `tags=story` returns stories sorted by relevance. We pick the
-    top hit whose points >= min_points (filters out joke/dead stories).
+    top hit whose points >= min_points (filters out joke/dead stories) AND that
+    shares >= `min_overlap` significant tokens with `title` (relevance guard so a
+    loose fuzzy match can't attach an unrelated thread's comments).
     """
     q = _strip_title_for_search(title)
     if len(q) < 6:
@@ -218,64 +266,144 @@ def find_hn_story_by_title(title: str, min_points: int = 5) -> Optional[str]:
     if not hits:
         return None
     hits.sort(key=lambda h: h.get("points") or 0, reverse=True)
-    return str(hits[0]["objectID"])
+    src_tokens = _significant_tokens(title)
+    for h in hits:
+        hit_title = h.get("title") or h.get("story_title") or ""
+        if len(_significant_tokens(hit_title) & src_tokens) >= min_overlap:
+            return str(h["objectID"])
+    return None
 
 
-# ─── Reddit ──────────────────────────────────────────────────────────────────
+# ─── V2EX (zero-auth Chinese tech community) ─────────────────────────────────
+#
+# Two zero-auth endpoints, no API key:
+#   discovery — sov2ex.com community ES index: /api/search?q=<kw> (V2EX has no
+#               first-party keyword search; sov2ex indexes topics + replies)
+#   bodies    — v2ex.com/api/topics/show.json?id=<id>  (topic)
+#               v2ex.com/api/replies/show.json?topic_id=<id>  (replies)
+# This is the ONLY real Chinese *comment-text* source this phase — TrendRadar and
+# the competitor-KOL plane fetch metadata only.
 
-REDDIT_HOST_PATTERN = re.compile(r"(?:www\.|old\.|new\.)?reddit\.com")
-
-
-def _build_reddit_json_url(url: str) -> Optional[str]:
-    """Convert any Reddit comment URL to its .json API form."""
-    if not url:
-        return None
-    parsed = urlparse(url)
-    if not REDDIT_HOST_PATTERN.search(parsed.netloc):
-        return None
-    path = parsed.path.rstrip("/")
-    if not path:
-        return None
-    return f"https://www.reddit.com{path}.json"
+SOV2EX_SEARCH = "https://www.sov2ex.com/api/search?q={query}&size=10&sort=sumup"
+V2EX_TOPIC_API = "https://www.v2ex.com/api/topics/show.json?id={id}"
+V2EX_REPLIES_API = "https://www.v2ex.com/api/replies/show.json?topic_id={id}"
 
 
-def fetch_reddit_top_comments(url: str, max_count: int = 5) -> List[Dict]:
-    """Fetch top comments from a Reddit submission, sorted by score.
+def find_v2ex_topic_by_brand(
+    brand: str, max_age_days: int = 90, min_replies: int = 2
+) -> Optional[str]:
+    """Search the sov2ex ES index for a *recent, relevant* V2EX topic about `brand`.
 
-    Returns up to max_count top-level comments with content/author/score.
-    Empty list on any failure (deleted post, network error, rate limit, etc.).
+    Returns the most-replied qualifying topic id (str), or None. Zero-auth.
+
+    sov2ex has no first-party recency/relevance filtering, so a bare keyword
+    query happily returns decade-old unrelated threads (e.g. "professor" → a
+    2017 PHP-course post). We guard three ways before accepting a hit:
+      - recency: `created` within `max_age_days` (Chinese communities lag the
+        English news cycle, so this is looser than the 7-day report window)
+      - relevance: the brand term must actually appear in the topic title/body
+      - discussion: at least `min_replies` replies (a 0-reply thread has no
+        community voice to quote anyway)
     """
-    api_url = _build_reddit_json_url(url)
-    if not api_url:
+    if not brand or len(brand) < 3:
+        return None
+    from urllib.parse import quote
+    payload = _http_get_json(SOV2EX_SEARCH.format(query=quote(brand)))
+    if not payload:
+        return None
+    hits = payload.get("hits") or []
+    cutoff = time.time() - max(1, max_age_days) * 86400
+    brand_lc = brand.lower()
+    scored = []
+    for h in hits:
+        src = h.get("_source") or {}
+        tid = src.get("id")
+        if not tid:
+            continue
+        replies = int(src.get("replies") or 0)
+        if replies < min_replies:
+            continue
+        haystack = f"{src.get('title','')} {src.get('content','')}".lower()
+        if brand_lc not in haystack:
+            continue
+        created = src.get("created") or ""
+        if created:
+            try:
+                ts = time.mktime(time.strptime(created[:19], "%Y-%m-%dT%H:%M:%S"))
+                if ts < cutoff:
+                    continue
+            except (ValueError, OverflowError):
+                pass  # unparseable timestamp → don't reject on recency alone
+        scored.append((replies, str(tid)))
+    if not scored:
+        return None
+    scored.sort(reverse=True)  # most-replied first = hottest discussion
+    return scored[0][1]
+
+
+def fetch_v2ex_comments(topic_id: str, max_count: int = 5) -> List[Dict]:
+    """Fetch top replies for a V2EX topic via the zero-auth JSON API.
+
+    V2EX's v1 reply API exposes no per-reply like count, so `likes` is 0.
+    Returns up to max_count replies (API returns chronological; we take the
+    first max_count). Empty list on any failure.
+    """
+    if not topic_id:
+        return []
+    topics = _http_get_json(V2EX_TOPIC_API.format(id=topic_id))
+    topic_url = ""
+    if isinstance(topics, list) and topics:
+        topic_url = topics[0].get("url") or ""
+    elif isinstance(topics, dict):
+        topic_url = topics.get("url") or ""
+
+    replies = _http_get_json(V2EX_REPLIES_API.format(id=topic_id))
+    if not isinstance(replies, list):
         return []
 
-    data = _http_get_json(api_url)
-    if not isinstance(data, list) or len(data) < 2:
-        return []
-
-    listing = data[1].get("data", {}).get("children", [])
     comments: List[Dict] = []
-    for child in listing:
+    for r in replies:
         if len(comments) >= max_count:
             break
-        if child.get("kind") != "t1":
+        content = (r.get("content") or "").strip()
+        if not content:
             continue
-        c = child.get("data", {})
-        body = c.get("body") or ""
-        if not body.strip() or body in ("[removed]", "[deleted]"):
-            continue
-        body = html.unescape(body)
+        member = r.get("member") or {}
         comments.append({
-            "platform": "reddit",
-            "content": _truncate(body, 200),
-            "author": c.get("author", "[deleted]"),
-            "likes": int(c.get("score") or 0),
-            "url": "https://www.reddit.com" + (c.get("permalink") or ""),
+            "platform": "v2ex",
+            "content": _truncate(html.unescape(content), 200),
+            "author": member.get("username", "anonymous"),
+            "likes": 0,  # V2EX v1 API exposes no per-reply like count
+            "url": topic_url or f"https://www.v2ex.com/t/{topic_id}",
         })
+    return comments
 
-    # Reddit returns comments in their default sort (usually "confidence"); resort by score
-    comments.sort(key=lambda x: x["likes"], reverse=True)
-    return comments[:max_count]
+
+# ─── 知乎 / B站 (cred-gated stubs) ────────────────────────────────────────────
+#
+# Both require a logged-in cookie for any comment-text access. Without it they
+# soft-degrade to [] (the report annotates coverage as skipped). Wired as
+# best-effort: presence of ZHIHU_COOKIE / BILIBILI_COOKIE env vars unlocks them.
+
+def fetch_zhihu_comments(query: str, max_count: int = 5) -> List[Dict]:
+    """Cred-gated stub: needs ZHIHU_COOKIE. Returns [] when unconfigured."""
+    import os
+    if not os.environ.get("ZHIHU_COOKIE"):
+        logging.debug("zhihu enrichment skipped: no ZHIHU_COOKIE")
+        return []
+    # Implementation deferred — cookie plumbing only; keep soft-degrade contract.
+    logging.debug("zhihu enrichment: ZHIHU_COOKIE present but fetch not implemented yet")
+    return []
+
+
+def fetch_bilibili_comments(query: str, max_count: int = 5) -> List[Dict]:
+    """Cred-gated stub: needs BILIBILI_COOKIE. Returns [] when unconfigured."""
+    import os
+    if not os.environ.get("BILIBILI_COOKIE"):
+        logging.debug("bilibili enrichment skipped: no BILIBILI_COOKIE")
+        return []
+    logging.debug("bilibili enrichment: BILIBILI_COOKIE present but fetch not implemented yet")
+    return []
 
 
 # ─── Dispatch ────────────────────────────────────────────────────────────────
@@ -285,6 +413,7 @@ def enrich_article_with_comments(
     max_per_source: int = 5,
     used_story_ids: Optional[set] = None,
     days_window: int = 7,
+    used_v2ex_ids: Optional[set] = None,
 ) -> List[Dict]:
     """Inspect an article's url and reactions, fetch comments where possible.
 
@@ -298,12 +427,15 @@ def enrich_article_with_comments(
 
     `days_window`: how far back (in days) to look for HN stories during the
     brand-search fallback. Defaults to 7 to align with the weekly report window.
+
+    `used_v2ex_ids`: same dedup contract as `used_story_ids` but for V2EX topic
+    ids claimed by the Chinese-voice brand search. Mutated in place.
     """
     enriched: List[Dict] = []
 
-    # Try the article's own link first (if it itself is an HN/Reddit thread)
-    primary_url = article.get("link") or article.get("reddit_url") or ""
-    for fetcher in (fetch_hn_top_comments, fetch_reddit_top_comments):
+    # Try the article's own link first (if it itself is an HN thread)
+    primary_url = article.get("link") or ""
+    for fetcher in (fetch_hn_top_comments,):
         if len(enriched) >= max_per_source:
             break
         got = fetcher(primary_url, max_count=max_per_source - len(enriched))
@@ -313,13 +445,13 @@ def enrich_article_with_comments(
     for reaction in article.get("reactions", []) or []:
         if len(enriched) >= max_per_source * 2:  # cap total
             break
-        r_url = reaction.get("link") or reaction.get("reddit_url") or ""
-        for fetcher in (fetch_hn_top_comments, fetch_reddit_top_comments):
+        r_url = reaction.get("link") or ""
+        for fetcher in (fetch_hn_top_comments,):
             got = fetcher(r_url, max_count=max(2, max_per_source - len(enriched)))
             enriched.extend(got)
 
     # ── Fallbacks: brand-keyword HN search, then title fuzzy match ──
-    # When the announcement has no direct HN/Reddit link, proactively look for
+    # When the announcement has no direct HN link, proactively look for
     # any HN thread about the same brand/project within the report window.
     # This is what unlocks community voice for company-blog announcements
     # (Anthropic, OpenAI, Google) that don't seed HN links themselves.
@@ -327,15 +459,16 @@ def enrich_article_with_comments(
         since_epoch = int(time.time()) - max(1, days_window) * 86400
         story_id: Optional[str] = None
         matched_via = None
+        src_title = article.get("title", "") or ""
 
         for brand in _extract_brand_terms(article):
-            candidate = find_hn_story_by_brand(brand, since_epoch)
+            candidate = find_hn_story_by_brand(brand, since_epoch, source_title=src_title)
             if not candidate:
                 continue
             if used_story_ids is not None and candidate in used_story_ids:
                 logging.debug(
                     f"enrich brand-search skipped: HN story {candidate} already claimed "
-                    f"(brand='{brand}', title='{(article.get('title','') or '')[:60]}')"
+                    f"(brand='{brand}', title='{src_title[:60]}')"
                 )
                 continue
             story_id = candidate
@@ -344,7 +477,7 @@ def enrich_article_with_comments(
 
         if not story_id:
             # Last resort: title fuzzy match (kept for cases brand extraction fails)
-            candidate = find_hn_story_by_title(article.get("title", "") or "")
+            candidate = find_hn_story_by_title(src_title)
             if candidate and (used_story_ids is None or candidate not in used_story_ids):
                 story_id = candidate
                 matched_via = "title-fuzzy"
@@ -359,6 +492,27 @@ def enrich_article_with_comments(
                 enriched.extend(got)
                 if used_story_ids is not None:
                     used_story_ids.add(story_id)
+
+    # ── Chinese voice: V2EX brand search (additive, zero-auth) ──
+    # Always attempt so the report carries Chinese community sentiment, not only
+    # English HN. Brand terms (often English product names like "Cursor"
+    # / "Claude") are found even in Chinese threads. Deduped via used_v2ex_ids.
+    for brand in _extract_brand_terms(article):
+        topic_id = find_v2ex_topic_by_brand(brand)
+        if not topic_id:
+            continue
+        if used_v2ex_ids is not None and topic_id in used_v2ex_ids:
+            continue
+        got = fetch_v2ex_comments(topic_id, max_per_source)
+        if got:
+            logging.debug(
+                f"enrich v2ex brand={brand} hit: topic {topic_id} for "
+                f"'{(article.get('title','') or '')[:60]}'"
+            )
+            enriched.extend(got)
+            if used_v2ex_ids is not None:
+                used_v2ex_ids.add(topic_id)
+            break
 
     if enriched:
         article["enriched_comments"] = enriched

@@ -1,10 +1,26 @@
 # ai-pulse — 不要 commit 的本地状态
 
-# 上游仓库（install.sh 克隆到这里）
+# 旧 clone+patch 模型残留（已废弃，留作历史兼容）
 upstream/
-
-# 安装时备份的旧文件
 .ai-pulse-backup/
+
+# spec-kit 开发工具产物（本地设计/治理脚手架，不随产品发布）
+.claude/
+.specify/
+specs/
+
+# 运行时抓取缓存（X / API 响应），按机器再生，不收
+follow-news-addons/.cache/
+
+# TrendRadar 运行时状态（数据库 / RSS / HTML） — 仓内保留空目录骨架（.gitkeep），内容不收
+trendradar/output/news/*
+trendradar/output/rss/*
+trendradar/output/html/*
+trendradar/output/*.html
+!trendradar/output/*/.gitkeep
+
+# follow-news 引擎本地化后的 workspace（解析后配置 + 归档 + 用户私有源）
+follow-news-addons/workspace/
 
 # Python
 __pycache__/
@@ -13,6 +29,10 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+
+# 备份文件
+*.bak
 
 # 编辑器
 .vscode/
@@ -26,10 +46,13 @@ Thumbs.db
 test-*.json
 *.tmp
 
-# 用户私有 workspace（如果有人在 ai-pulse 仓里直接放 workspace）
-workspace/
+# 用户私有 workspace（如果有人在仓根直接放 workspace）
+/workspace/
 
 # 用户私密 API key — 千万不要 commit
 .env
 .env.local
 .env.*.local
+
+# 测试产出的报告文档（开箱即用演示，不收）
+reports/

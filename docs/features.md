@@ -3,9 +3,9 @@
 ai-pulse 是 follow-news 上游 + TrendRadar 中文热榜 + 自研 addons 的合成 OpenClaw skill，部署后注册为 `ai-pulse`。
 
 跨能力共用基础设施：
-- 信源采集层：`scripts/run-pipeline.py` 串联 `fetch-rss / fetch-github / fetch-twitter / fetch-reddit / fetch-web / fetch-podcast`
+- 信源采集层：`scripts/run-pipeline.py` 串联 `fetch-rss / fetch-github / fetch-twitter / fetch-web / fetch-podcast`
 - 中文社区层：TrendRadar SQLite + `weekly_export.py` → file:// RSS → run-pipeline 接入
-- 评论富化层：`scripts/enrich_comments.py`（HN/Reddit 零鉴权 JSON API）
+- 评论富化层：`scripts/enrich_comments.py`（HN/V2EX 零鉴权 JSON API）
 - 分发模板：`references/templates/{chat,discord,email,pdf}.md` + `references/digest-prompt.md`
 
 ---
@@ -25,9 +25,9 @@ ai-pulse 是 follow-news 上游 + TrendRadar 中文热榜 + 自研 addons 的合
 
 ---
 
-## 2. 周度社区反馈周报（Rule 5，weekly competitor monitor）
+## 2. 周度社区情绪周报（Rule 5，weekly community-sentiment digest）
 
-**触发**：用户问"本周 / 周报 / 竞品监控 / weekly digest"等。
+**触发**：用户问"本周 / 周报 / weekly digest / AI 圈周报"等。**竞品官方动态 + KOL 已迁至「按需竞品调研」（见 §4），周报不再承载竞品段。**
 
 **与日报的根本差异**：日报是新闻 5 问（What/Why/Who/Impact/Source）模板，周报是 **社区反馈** 优先——按情绪分组（👍/👎/⚖️/🇨🇳）+ 必含 `🌐 跨事件社区反馈大章`。绝不允许走 5 问模板（SKILL.md Rule 5 + `references/prompts/competitor-monitor.md` 双重约束）。
 
@@ -40,7 +40,7 @@ python3 scripts/weekly-feedback.py \
   --days 7 \
   --output /tmp/td-weekly-merged.json \
   --markdown /tmp/td-weekly.md \
-  --enrich-tiers tier1,tier2
+  --enrich-top 20
 ```
 
 脚本内部分四步：
@@ -50,10 +50,11 @@ python3 scripts/weekly-feedback.py \
 - 触发 `run-pipeline.py --hours 168`（7×24h），TrendRadar RSS 通过 `file://` URL 注入到 follow-news 信源池（patch 在 `fetch-rss.py` 加的 `file://` 分支）
 - 跑完产出统一格式 merged JSON
 
-### 2.2 分类（`classify_article` + `assign_tier`）
-- announcement vs reaction：标题正则 + 信源类型双判
-- Tier 1/2/3：vendor 白名单（OpenAI / Anthropic / DeepSeek / Cursor 等）+ SDK release 黑名单
-- `dedup_same_project()` 在 tier 分配前合并同项目连续版本（防止 langchain v0.40.1 / v0.40.2 各占一个 Tier 1 槽位）
+### 2.2 分类 + 互动热度评分（`classify_article` + `engagement_score`）
+- announcement vs reaction：标题正则 + 信源类型双判（reaction = 讨论类，现已升为一等舆论，标题/正文本身进候选池）
+- `engagement_score()`：**入选与排序的真正依据**——HN points+评论 / Twitter 互动 / 中文热榜排名+抓取次数 / 多源覆盖的 log-damped 加性归一；vendor 白名单只作 ×1.25 加成（不再是门槛），SDK release / clickbait 降权。结果存 `_engagement`
+- `assign_tier` 保留但**仅作 `_tier` 提示**，不再决定是否抓评论
+- `dedup_same_project()` 在评分前合并同项目连续版本（防止 langchain v0.40.1 / v0.40.2 各占一个槽位）
 
 ### 2.3 Reaction 配对（`pair_reactions`，brand-cooccurrence）
 - 每条 announcement 抽 ≤6 个 anchor（GitHub repo 名优先，再退回标题 token，过滤 noise + version 形式）
@@ -61,15 +62,16 @@ python3 scripts/weekly-feedback.py \
 - 一级匹配落空再走 token-overlap fallback（≥2 共现 token）
 - 时间过滤：reaction 不能早于 announcement 12h 以上
 
-### 2.4 评论富化（`--enrich-tiers tier1,tier2`）
-经 `enrich_comments.py:enrich_article_with_comments()`：
+### 2.4 评论富化（`--enrich-top N`，按 `_engagement` 取热度 Top-N）
+经 `enrich_comments.py:enrich_article_with_comments()`，对热度 Top-N 候选（新闻+讨论混合）抓评论原文：
 
-1. 直链 → article.link / reactions.link 中包含 HN/Reddit URL 的直接调 API
+1. 直链 → article.link / reactions.link 中包含 HN URL 的直接调 API
 2. **品牌主动搜索**（新）→ `_extract_brand_terms` 提项目名 → `find_hn_story_by_brand` 调 Algolia 在 7 天窗口内搜，命中 ≥3 分的 story 取最高分。`used_story_ids` 集合跨 article 共享，防多个变体落到同一 thread
 3. 标题模糊匹配 → `find_hn_story_by_title` 兜底
-4. 命中后 `_fetch_hn_story_comments` 拉 top 评论；Reddit 走 `.json` API，按 score 重排序
+4. 命中后 `_fetch_hn_story_comments` 拉 top 评论
+5. **中文评论正文**（新）→ `find_v2ex_topic_by_brand` 走 sov2ex ES 索引（零鉴权）发现 topic，`fetch_v2ex_comments` 拉回复正文；知乎/B站为 cred-gated stub（无 cookie 软降级为空）
 
-**输出**：`output_stats.enriched_by_tier` 给 agent 看每档的命中数；`output_stats.trendradar_status` 报告 SQLite 最新日期 + `is_stale` 布尔，让 agent 区分"中文社区本周确实没讨论"还是"中文管道停摆"。
+**输出**：`output_stats.engagement_top_n` / `enriched_count` / `floating_threads_count` 给 agent 看富化规模；顶层 `floating_threads` 数组 = 高互动但未挂任何 announcement 的独立讨论串（重定义后的「跨事件社区反馈」种子）；`output_stats.trendradar_status` 报告 SQLite 最新日期 + `is_stale` 布尔，让 agent 区分"中文社区本周确实没讨论"还是"中文管道停摆"。
 
 ---
 
@@ -77,7 +79,7 @@ python3 scripts/weekly-feedback.py \
 
 **触发**：用户对**特定产品/版本/事件**问"社区反馈 / 怎么看 / 在国外火吗"等，且**不**含周报关键词。
 
-**与周报的边界**：周报是全量扫，topic-feedback 是单点查；周报有 4 阶段语义压缩，topic-feedback 是 4 路机械搜索。
+**与周报的边界**：周报是全量扫（按互动热度排序选题 + 情绪分组），topic-feedback 是单点查；周报做热度评分+评论富化的语义聚合，topic-feedback 是多路机械搜索 + 评论原文 + KOL。
 
 **实现路径**：
 ```bash
@@ -86,35 +88,61 @@ python3 scripts/topic-feedback.py \
   --trendradar-dir <ws>/upstream/TrendRadar \
   --days 30 \
   --output /tmp/topic-feedback.json \
-  --markdown /tmp/topic-feedback.md \
-  --enrich-hn-comments
+  --markdown /tmp/topic-feedback.md
 ```
 
-四路并发（`ThreadPoolExecutor(4)`）：
+> HN + V2EX 评论原文与 KOL 内容默认抓取，无需 flag。`--enrich-hn-comments` 已成 no-op（向后兼容）；`--no-comments` 跳过评论原文抓取。
+
+五路并发（`ThreadPoolExecutor(6)`）：
 
 | 源 | 方式 | 备注 |
 |---|---|---|
-| HN | Algolia `tags=story` 搜索 + 前 3 个 story 拉 top 3 评论 | 复用 `enrich_comments.py` 的 `_http_get_json` |
-| Reddit | OAuth `oauth.reddit.com/search.json?sort=relevance&t=month` | AI 子版块（LocalLLaMA / OpenAI / ChatGPT 等）score × 1.3 加权 |
+| HN | Algolia `tags=story` 搜索 + 前 5 个 story 各拉 5 条评论（默认开） | 复用 `enrich_comments.py` 的 `_http_get_json` / `_fetch_hn_story_comments` |
+| V2EX | sov2ex ES 索引（零鉴权）按 relevance/recency/min_replies 选 top5 topic + `fetch_v2ex_comments` 拉回复正文 | 复用 `enrich_comments.py`；V2EX v1 API 无每条赞数 → `likes:0` |
+| KOL | 子进程调 `fetch-competitor-kol.py --query`（profiles-free 关键词模式），抓 B站/知乎/即刻/公众号 | B站匿名；知乎/即刻/公众号需 `.env` 凭证，缺则 `coverage=skip`；带 industry/role 场景标签 |
 | Twitter | best-effort 探测 `opencli twitter search` 子命令 | 不在则 `status: "skipped: ..."`，不影响其他源 |
 | TrendRadar 中文 | 直读最近 7 个 SQLite 文件 + `LIKE` AND 拼接多词 | `COLLATE NOCASE` 不区分大小写；不做 zh-EN 别名映射 |
 
 **TTL 缓存**：10 分钟（`tempfile.gettempdir()/topic-feedback-cache/<source>-<sha256(query)[:16]>.json`），同会话连问"再查 X"不会重复打 API。
 
-**空结果**：4 路全 0 → `no_results_hint` 字段告诉 agent 该建议用户缩短/改英文 query；agent 读到就不允许编造内容。
+**空结果**：全路全 0 → `no_results_hint` 字段告诉 agent 该建议用户缩短/改英文 query；agent 读到就不允许编造内容。
 
-**输出契约**：4 路同形 `{status, count, results: []}`；agent 走 `references/prompts/topic-feedback.md` 写中文反馈报告（来源三要素 / 👍 数 / 不编造）。
+**输出契约**：各源同形 `{status, count, results: []}`（HN/V2EX `results[]` 含评论原文，KOL 另带 `coverage[]`）；agent 走 `references/prompts/topic-feedback.md` 写中文反馈报告（来源三要素 / 👍 数 / 不编造）。
 
 ---
 
-## 4. 配置与运维路径
+## 4. 按需竞品调研（Rule 7，on-demand competitor brief）
+
+**触发**：泛指的"竞品调研 / 国产 agent 都在做什么"（→ 默认全量），或"调研 <竞品> / <竞品>最新动态" (→ 单产品)，或"<行业> 有哪些 agent 竞品"（→ 单行业）。
+
+**与周报的边界**：竞品的官方动态（发布/changelog/文档）+ 行业/岗位 KOL 全部归这里；周报只做 AI 圈社区情绪，不再碰竞品。
+
+**三种维度（CLI flag 互斥）**：
+- **全量（默认，无 flag 或 `--all`）**：抓取**全部录入竞品（约 28 个）**的官方 + KOL，出长报告；官方时间线按产品分组。
+- **单产品（`--product`）** / **单行业（`--industry`）**：精准单点深挖。
+
+**实现路径**：
+```bash
+python3 scripts/competitor-brief.py \
+  --profiles workspace-config/competitor-profiles.json \
+  --window-days 30 \
+  --out-json /tmp/competitor-brief.json --out-md /tmp/competitor-brief.md
+# 无 flag = 全量 28；加 --product "通义灵码" 或 --industry "金融" 切单点
+```
+
+- 官方源经 `fetch-competitor-official.py`（github releases / changelog CSS / sitemap / App Store / RSS），每源 try/except 软降级 + `coverage[]` 注记（ok(N)/skip(unconfigured)/error/degrade）。
+- KOL 经 `fetch-competitor-kol.py` 多平台采集（B站匿名 + 知乎/即刻/公众号需凭证），缺凭证软降级为空。
+- `--window-days` 默认 30；零 LLM，方向/场景 synthesis 由 agent 按 `references/prompts/competitor-brief.md` 完成。**只用数据 url，禁止编造链接**。
+
+---
+
+## 5. 配置与运维路径
 
 | 路径 | 作用 |
 |---|---|
 | `<ws>/config/follow-news-sources.json` | 信源覆盖（不存在则用 `config/defaults/sources.json`） |
 | `<ws>/config/follow-news-topics.json` | 话题分类覆盖 |
-| `<ws>/archive/follow-news/daily-json/` | 每日 merged JSON 归档（weekly 累积模式数据底座） |
-| `<ws>/archive/follow-news/daily-*.md` | 每日报告（weekly 模式作为 supplementary `daily_reports_context`） |
+| `<ws>/archive/follow-news/daily-json/` | 每日 merged JSON 归档（weekly 累积模式数据底座，仅 `--archive-dir` 非 fetch-now 模式用） |
 | `/tmp/follow-news-*-cache.json` | RSS / GitHub / Web 等各 fetcher 的 ETag/304 缓存（patch 把 `/tmp/` 替换为 `tempfile.gettempdir()` 以兼容 Windows） |
 
 **部署链**：`install.sh`（pin `PINNED_FOLLOW_NEWS_SHA=640901d` + `PINNED_TRENDRADAR_SHA=68db3a9`）→ `git apply patches/follow-news/upstream.patch` → Step 5b sed 改 footer 品牌 → 复制 `follow-news-addons/scripts` + `references/prompts` → `deploy-skill.sh` 整目录 cp 到 `~/.openclaw/skills/ai-pulse/`。

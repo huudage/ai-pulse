@@ -4,7 +4,7 @@ Weekly feedback aggregator for follow-news.
 
 Pools the last N days of archived daily merged JSON into a single weekly digest
 that pairs AI tech announcements with downstream community reactions
-(HN / Reddit / Twitter / Web search / TrendRadar 中文社区).
+(HN / Twitter / Web search / TrendRadar 中文社区).
 
 Usage:
     python3 weekly-feedback.py \\
@@ -24,13 +24,14 @@ for cross-day deduplication and multi-source detection.
 import argparse
 import json
 import logging
+import math
 import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 SCRIPTS_DIR = Path(__file__).parent
 
@@ -73,50 +74,6 @@ def collect_daily_files(archive_dir: Path, days: int) -> List[Path]:
             files.append((d, p))
     files.sort()
     return [p for _, p in files]
-
-
-DAILY_REPORT_PATTERN = re.compile(r"^daily-(\d{4}-\d{2}-\d{2})\.md$")
-
-
-def collect_daily_reports(archive_dir: Path, days: int, max_chars: int = 4000) -> List[Dict[str, Any]]:
-    """Find rendered daily markdown reports within the last N days.
-
-    Returns [{date, path, content}, ...] sorted oldest→newest. Each content is
-    truncated to max_chars to keep the weekly JSON small. Empty list when the
-    archive is missing or contains no in-window reports.
-
-    The agent uses these as supplementary context: when a daily already covered
-    an event, the weekly should focus on community-feedback angles the daily
-    didn't cover, instead of re-summarizing the news. When the list is empty,
-    the agent generates the weekly purely from the fetch corpus.
-    """
-    if not archive_dir or not archive_dir.is_dir():
-        return []
-    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
-    found: List[Tuple[Any, Path]] = []
-    for p in archive_dir.iterdir():
-        if not p.is_file():
-            continue
-        m = DAILY_REPORT_PATTERN.match(p.name)
-        if not m:
-            continue
-        try:
-            d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if d >= cutoff_date:
-            found.append((d, p))
-    found.sort()
-    out: List[Dict[str, Any]] = []
-    for d, p in found:
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n\n…[truncated]…"
-        out.append({"date": d.isoformat(), "path": str(p), "content": text})
-    return out
 
 
 def flatten_daily_json(daily_files: List[Path], logger: logging.Logger) -> List[Dict[str, Any]]:
@@ -355,6 +312,57 @@ def fetch_now(args: argparse.Namespace, logger: logging.Logger, merge_mod) -> Li
     return articles
 
 
+def fetch_hn_articles(hours: int, verbose: bool, logger: logging.Logger) -> List[Dict[str, Any]]:
+    """Fetch AI-relevant HN stories + their top comments via fetch-hn.py.
+
+    Returned articles already carry `enriched_comments`, so they are the primary
+    real-comment source. Callers must append these AFTER corpus deduplication —
+    they have a low base quality_score and would otherwise be dropped by
+    title-similarity dedup in favor of comment-less RSS/Twitter duplicates,
+    taking their scraped comments with them.
+    """
+    import subprocess
+    import tempfile
+
+    hn_script = SCRIPTS_DIR / "fetch-hn.py"
+    if not hn_script.exists():
+        logger.warning("fetch-hn.py not found; skipping HN comment scraping")
+        return []
+
+    child_env = os.environ.copy()
+    child_env["PYTHONUTF8"] = "1"
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    hn_tmp = Path(tempfile.gettempdir()) / "td-fetch-now-hn.json"
+    logger.info(f"Running fetch-hn.py --hours {hours} for AI HN stories + comments...")
+    try:
+        subprocess.run(
+            [sys.executable, str(hn_script),
+             "--hours", str(hours),
+             "--output", str(hn_tmp)] + (["--verbose"] if verbose else []),
+            check=False, timeout=300, env=child_env,
+        )
+    except Exception as e:
+        logger.warning(f"fetch-hn.py failed: {e} (continuing without HN comments)")
+        return []
+
+    if not hn_tmp.exists():
+        return []
+    with open(hn_tmp, "r", encoding="utf-8") as f:
+        hn_data = json.load(f)
+    hn_articles: List[Dict[str, Any]] = []
+    for src in hn_data.get("sources", []):
+        for a in src.get("articles", []):
+            a["source_type"] = "hn"
+            a["source_name"] = src.get("name", "Hacker News")
+            a["source_id"] = src.get("source_id", "hackernews")
+            # High base score reflects that these are top-voted, comment-rich
+            # stories — and keeps them prominent in any downstream sorting.
+            a["quality_score"] = 12 + min(10, (a.get("points", 0) or 0) // 150)
+            hn_articles.append(a)
+    logger.info(f"fetch-hn.py returned {len(hn_articles)} HN stories with enriched_comments")
+    return hn_articles
+
+
 # Heuristic patterns for announcement detection.
 ANNOUNCE_TITLE_PATTERN = re.compile(
     r"\b(release[ds]?|launch(?:ed|ing)?|announc(?:e|es|ed|ing)|introduc(?:e|es|ed|ing)|"
@@ -364,7 +372,7 @@ ANNOUNCE_TITLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-REACTION_SOURCE_TYPES = {"reddit", "twitter", "web"}
+REACTION_SOURCE_TYPES = {"twitter", "web"}
 REACTION_RSS_ID_PATTERN = re.compile(r"hn|hacker[- ]?news|lobsters|trendradar", re.IGNORECASE)
 
 # Tier 1 vendor patterns — matched against title + source_name.
@@ -401,7 +409,7 @@ TIER1_VENDOR_RE = re.compile("|".join(TIER1_VENDOR_PATTERNS), re.IGNORECASE)
 # SDK / client-library release noise: GitHub auto-releases of language bindings
 # (openai-python, anthropic-sdk-python, langchain-anthropic, mem0 ts-v..., etc.)
 # match the Tier 1 vendor regex via brand name but are not product announcements
-# — no one discusses "openai-python v2.40.0" on HN/Reddit. Demote to tier3 so the
+# — no one discusses "openai-python v2.40.0" on HN. Demote to tier3 so the
 # weekly feedback report stops wasting Tier-1 slots on package bumps.
 SDK_RELEASE_PATTERN = re.compile(
     r"(?ix)"
@@ -425,7 +433,18 @@ CLICKBAIT_PATTERN = re.compile(
 
 
 def classify_article(article: Dict[str, Any]) -> str:
-    """Return 'announcement' / 'reaction' / 'neutral'."""
+    """Return 'announcement' / 'reaction' / 'neutral'.
+
+    Maps to the news/discussion split that drives sentiment selection:
+      - 'reaction'  == discussion-class (HN/Twitter/Web + HN-style RSS
+        aggregators). These are now FIRST-CLASS sentiment: in main() they enter
+        the engagement-ranked candidate pool on their own title+body, not merely
+        as chips paired under an announcement.
+      - 'announcement' == news-class (official/GitHub releases, launch-worded or
+        multi-source RSS).
+      - 'neutral'   == everything else.
+    Names kept verbatim so pair_reactions() and the output schema stay stable.
+    """
     src_type = article.get("source_type", "")
     title = article.get("title", "") or ""
     src_id = article.get("source_id", "") or ""
@@ -488,6 +507,79 @@ def assign_tier(article: Dict[str, Any]) -> str:
         return "tier2"
 
     return "tier3"
+
+
+def engagement_score(article: Dict[str, Any]) -> float:
+    """Community-engagement heat for sentiment-driven selection.
+
+    Replaces vendor-whitelist tiering as the *selection* signal: the weekly
+    report should foreground what the community is actively discussing, not
+    merely what a tracked vendor shipped. Higher = hotter discussion.
+
+    Log-damped + additive so heterogeneous sources are comparable and a single
+    huge raw count (e.g. a 4000-point HN story) can't swamp everything:
+      - HN:         log1p(points) + 1.5*log1p(num_comments)
+      - TrendRadar: max(0,30-rank)/10 + log1p(crawl_count)  (parsed from summary)
+      - multi-source coverage: + 1.2*log1p(source_count)
+      - plain RSS news (no native engagement): quality_score/22 weak baseline
+
+    Called twice in main(): once pre-enrichment (native signals only), once
+    after comment scraping so a located comment-rich thread retroactively lifts
+    an otherwise-flat RSS news item via the enrichment bonus below.
+
+    Vendor regex is now a *booster* (×1.25), no longer a gate. Clickbait −1;
+    SDK version bumps ×0.3 (nobody discusses 'openai-python v2.40.0').
+    """
+    src_type = (article.get("source_type") or "").lower()
+    src_id = (article.get("source_id") or "").lower()
+    title = article.get("title", "") or ""
+    source_name = article.get("source_name", "") or ""
+
+    score = 0.0
+    has_native = False
+
+    if src_type == "hn" or "hacker" in src_id:
+        pts = article.get("points", 0) or 0
+        ncom = article.get("num_comments", 0) or 0
+        score += math.log1p(max(0, pts)) + 1.5 * math.log1p(max(0, ncom))
+        has_native = True
+    elif "trendradar" in src_id:
+        # rank / crawl_count are encoded in the RSS summary text (weekly_export.py)
+        summary = f"{article.get('summary','')} {article.get('snippet','')}"
+        m_rank = re.search(r"最小排名[:：]\s*(\d+)", summary)
+        m_crawl = re.search(r"被抓取\s*(\d+)\s*次", summary)
+        rank = int(m_rank.group(1)) if m_rank else 9999
+        crawl = int(m_crawl.group(1)) if m_crawl else 0
+        score += max(0.0, (30 - rank)) / 10.0 + math.log1p(max(0, crawl))
+        has_native = True
+
+    # Multi-source coverage bonus (independent of source type)
+    if article.get("multi_source") and (article.get("source_count", 0) or 0) >= 2:
+        score += 1.2 * math.log1p(article.get("source_count", 0) or 0)
+        has_native = True
+
+    # Plain RSS news with no native engagement → weak quality_score baseline
+    if not has_native:
+        score += (article.get("quality_score", 0) or 0) / 22.0
+
+    # Enrichment bonus: a located comment-rich thread lifts flat RSS news
+    enriched = article.get("enriched_comments") or []
+    if enriched:
+        likes_sum = sum(int(c.get("likes", 0) or 0) for c in enriched)
+        score += 0.8 * math.log1p(len(enriched)) + 0.5 * math.log1p(max(0, likes_sum))
+
+    # Vendor regex is now a booster, not a gate
+    combined = f"{title} {source_name}"
+    if TIER1_VENDOR_RE.search(combined):
+        score *= 1.25
+
+    # Penalties
+    if CLICKBAIT_PATTERN.search(combined):
+        score -= 1.0
+    if SDK_RELEASE_PATTERN.search(title):
+        score *= 0.3
+
+    return round(score, 4)
 
 
 def _project_key(article: Dict[str, Any]) -> Optional[str]:
@@ -771,7 +863,7 @@ def pair_reactions(
             metrics = r.get("metrics") or {}
             engagement = (
                 metrics.get("like_count", 0)
-                + r.get("score", 0)  # reddit upvotes
+                + r.get("score", 0)
                 + r.get("num_comments", 0)
             )
             return (r.get("quality_score", 0), engagement)
@@ -803,6 +895,7 @@ def render_markdown(
     days_used: int,
     days_requested: int,
     fetch_now: bool = False,
+    floating_threads: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Build a human-readable weekly digest markdown."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -840,8 +933,12 @@ def render_markdown(
         has_anything = True
 
         # Sort by tier (tier1 first) then by quality_score
+        # Sort by community-engagement heat (sentiment-driven), tier as tiebreak
         tier_rank = {"tier1": 0, "tier2": 1, "tier3": 2, "tierX": 9}
-        anns.sort(key=lambda x: (tier_rank.get(x.get("_tier", "tier3"), 5), -(x.get("quality_score", 0) or 0)))
+        anns.sort(key=lambda x: (
+            -(x.get("_engagement", 0.0) or 0.0),
+            tier_rank.get(x.get("_tier", "tier3"), 5),
+        ))
 
         lines.append(f"## {topic_id}")
         lines.append("")
@@ -849,7 +946,7 @@ def render_markdown(
             if ann.get("_tier") == "tierX":
                 continue
             title = ann.get("title", "").strip()
-            link = ann.get("link") or ann.get("external_url") or ann.get("reddit_url") or ""
+            link = ann.get("link") or ann.get("external_url") or ""
             source = ann.get("source_name", "")
             date_str = (ann.get("date") or "")[:10]
             score = ann.get("quality_score", 0)
@@ -869,7 +966,7 @@ def render_markdown(
                 lines.append(f"**社区反馈** ({len(reactions)})：")
                 for r in reactions:
                     r_title = r.get("title", "").strip()
-                    r_link = r.get("link") or r.get("reddit_url") or r.get("external_url") or ""
+                    r_link = r.get("link") or r.get("external_url") or ""
                     r_source = r.get("source_name", "")
                     metrics = r.get("metrics") or {}
                     engagement_parts = []
@@ -885,7 +982,7 @@ def render_markdown(
             enriched = ann.get("enriched_comments") or []
             if enriched:
                 lines.append("")
-                lines.append(f"**社区评论原文** (Tier 1 二次抓取，{len(enriched)} 条)：")
+                lines.append(f"**社区评论原文** (高热二次抓取，{len(enriched)} 条)：")
                 for c in enriched:
                     platform = c.get("platform", "")
                     author = c.get("author", "")
@@ -951,7 +1048,7 @@ def render_markdown(
                 lines.append(f"- … 还有 {len(items)-15} 条")
             lines.append("")
 
-    # ── 英文舆论侧（未配对的 HN / Reddit / Twitter / Web 反应）──
+    # ── 英文舆论侧（未配对的 HN / Twitter / Web 反应）──
     # 按平台（source_type）分桶，便于扫描
     en_unpaired_by_platform: Dict[str, List[Dict[str, Any]]] = {}
     for topic_id in sorted(topics.keys()):
@@ -966,9 +1063,7 @@ def render_markdown(
                 continue
             # 平台名优先取 source_type，否则从 source_id 推断
             stype = (art.get("source_type") or "").lower()
-            if stype == "reddit":
-                bucket = "Reddit"
-            elif stype == "twitter":
+            if stype == "twitter":
                 bucket = "Twitter"
             elif stype == "web":
                 bucket = "Web 搜索"
@@ -984,7 +1079,7 @@ def render_markdown(
         lines.append("---")
         lines.append("")
         total_en = sum(len(v) for v in en_unpaired_by_platform.values())
-        lines.append(f"## 🌐 其他社区舆论（HN / Reddit / Twitter / Web，未配对，共 {total_en} 条）")
+        lines.append(f"## 🌐 其他社区舆论（HN / Twitter / Web，未配对，共 {total_en} 条）")
         lines.append("")
         for bucket in sorted(en_unpaired_by_platform.keys(),
                              key=lambda p: (-len(en_unpaired_by_platform[p]), p)):
@@ -1009,7 +1104,56 @@ def render_markdown(
                 lines.append(f"- … 还有 {len(items)-15} 条")
             lines.append("")
 
+    # ── 🔥 跨事件高热讨论（独立讨论串，重定义后的「跨事件社区反馈」）──
+    # 高互动但未配对到任何发布的讨论串：锚定具体 thread URL + 计数 + 抓到的评论原文。
+    lines.extend(_render_floating_threads(floating_threads))
+
     return "\n".join(lines)
+
+
+def _render_floating_threads(floating_threads: Optional[List[Dict[str, Any]]]) -> List[str]:
+    """Render the redefined 跨事件社区反馈 section.
+
+    Each item is a high-engagement DISCUSSION thread NOT paired under any tracked
+    announcement — anchored to a concrete URL + engagement counts + scraped
+    comment text. This replaces the old vague "floating cross-event vibes": every
+    line here points at a real thread the reader can open.
+    """
+    if not floating_threads:
+        return []
+    lines: List[str] = ["---", ""]
+    lines.append(f"## 🔥 跨事件高热讨论（独立讨论串，共 {len(floating_threads)} 条）")
+    lines.append("")
+    lines.append("> 未挂到任何发布的高互动讨论串，按社区热度排序，每条带真实链接 + 计数 + 评论原文（不编造）。")
+    lines.append("")
+    for a in floating_threads:
+        title = (a.get("title") or "").strip()
+        link = a.get("link") or a.get("url") or a.get("external_url") or ""
+        source = a.get("source_name", "")
+        date_str = (a.get("date") or "")[:10]
+        parts = []
+        if a.get("score"):
+            parts.append(f"👍 {a['score']}")
+        if a.get("num_comments"):
+            parts.append(f"💬 {a['num_comments']}")
+        if a.get("points"):
+            parts.append(f"▲ {a['points']}")
+        counts = "  ".join(parts)
+        eng = a.get("_engagement", 0.0)
+        lines.append(f"### [{title}]({link})")
+        lines.append(f"- 来源: **{source}**  |  日期: {date_str}  |  热度: {eng}  {counts}".rstrip())
+        enriched = a.get("enriched_comments") or []
+        if enriched:
+            lines.append(f"- 评论原文（{len(enriched)} 条）：")
+            for c in enriched:
+                platform = c.get("platform", "")
+                author = c.get("author", "")
+                likes = c.get("likes", 0)
+                content = c.get("content", "")
+                likes_str = f" 👍 {likes}" if likes else ""
+                lines.append(f"  - **[{platform}] {author}**{likes_str}: {content}")
+        lines.append("")
+    return lines
 
 
 def main() -> int:
@@ -1018,23 +1162,22 @@ def main() -> int:
         "--archive-dir",
         type=Path,
         required=False,
-        help="Workspace archive dir. Two roles: (1) source for accumulated mode "
-             "(reads daily-json/<date>.json when --fetch-now is NOT set); "
-             "(2) supplementary context — when present in either mode, rendered "
-             "daily-*.md reports within --days are loaded into output JSON's "
-             "`daily_reports_context` for the agent to reference. Optional in fetch-now mode.",
+        help="Workspace archive dir. Source for accumulated mode: reads "
+             "daily-json/<date>.json when --fetch-now is NOT set. Ignored in "
+             "fetch-now mode (the default), which crawls fresh.",
     )
     parser.add_argument("--days", type=int, default=7, help="Lookback window in days (default: 7)")
     parser.add_argument("--output", type=Path, default=Path("/tmp/td-weekly-merged.json"), help="Output JSON path (same schema as merge-sources)")
     parser.add_argument("--markdown", type=Path, default=None, help="Optional markdown digest output path")
     parser.add_argument("--max-reactions", type=int, default=5, help="Max reactions per announcement (default: 5)")
     parser.add_argument(
-        "--enrich-tiers",
-        type=str,
-        default="tier1,tier2",
-        help="Comma-separated tier names (tier1,tier2,tier3) whose announcements get "
-             "HN/Reddit top-comment enrichment via zero-auth JSON APIs. "
-             "Default 'tier1,tier2'. Pass empty string to disable.",
+        "--enrich-top",
+        type=int,
+        default=20,
+        help="Number of top engagement-ranked candidates (news + discussion) whose "
+             "threads get HN/V2EX top-comment scraping via zero-auth JSON APIs. "
+             "Default 20. Pass 0 to disable enrichment. Replaces the old --enrich-tiers "
+             "(selection is now discussion-heat driven, not vendor-tier gated).",
     )
     parser.add_argument(
         "--fetch-now",
@@ -1090,6 +1233,16 @@ def main() -> int:
     merged = merge_mod.merge_article_sources(deduped)
     logger.info(f"After dedup+merge: {len(merged)} articles")
 
+    # Inject HN stories + their scraped comments AFTER dedup, so their
+    # enriched_comments survive (see fetch_hn_articles docstring). Duplicate
+    # events (HN vs RSS/Twitter) are collapsed later by the report's LLM
+    # semantic-dedup phase, which merges comment pools onto the canonical.
+    if args.fetch_now:
+        hn_articles = fetch_hn_articles(args.days * 24, args.verbose, logger)
+        if hn_articles:
+            merged.extend(hn_articles)
+            logger.info(f"After HN injection: {len(merged)} articles")
+
     # Classify
     announcements: List[Dict[str, Any]] = []
     reactions: List[Dict[str, Any]] = []
@@ -1116,55 +1269,74 @@ def main() -> int:
     # Pair reactions under announcements
     pair_reactions(announcements, reactions, merge_mod.normalize_title, logger, args.max_reactions)
 
-    # Optionally enrich announcements (default: tier1+tier2) with real HN/Reddit comment text
-    enrich_tiers = {t.strip() for t in (args.enrich_tiers or "").split(",") if t.strip()}
-    enriched_per_tier: Dict[str, int] = {}
-    if enrich_tiers:
+    # ── Engagement-driven selection (replaces vendor-tier gating) ──
+    # Score every article by community-discussion heat, then enrich the hottest
+    # Top-N — drawn from BOTH news (announcements) and discussion (reactions), so
+    # what the community is actively talking about is foregrounded, not merely
+    # what a tracked vendor shipped. Vendor regex survives only as a ×1.25 boost
+    # inside engagement_score(); _tier is still emitted as an agent hint.
+    for a in merged:
+        a["_engagement"] = engagement_score(a)
+
+    # Candidate pool = news + discussion, deduped by stable key
+    candidates: List[Dict[str, Any]] = []
+    seen_keys: set = set()
+    for a in announcements + reactions:
+        k = a.get("link") or a.get("url") or a.get("title", "")
+        if k and k in seen_keys:
+            continue
+        seen_keys.add(k)
+        candidates.append(a)
+    candidates.sort(key=lambda x: x.get("_engagement", 0.0), reverse=True)
+
+    top_n = max(0, args.enrich_top)
+    targets = candidates[:top_n]
+    enriched_count = 0
+    if top_n:
         from importlib.machinery import SourceFileLoader
         enricher = SourceFileLoader("enrich_comments", str(SCRIPTS_DIR / "enrich_comments.py")).load_module()
-        target_anns = [a for a in announcements if a.get("_tier") in enrich_tiers]
         logger.info(
-            f"Enriching {len(target_anns)} announcements (tiers={sorted(enrich_tiers)}) "
-            "with HN/Reddit comments…"
+            f"Enriching top {len(targets)} engagement candidates (of {len(candidates)}) "
+            "with HN/V2EX comments…"
         )
-        # Shared set tracks HN story IDs claimed by the title-search fallback so
-        # different titles can't all collapse onto the same fuzzy-matched thread.
+        # Shared sets prevent N article variants collapsing onto the same thread.
         used_story_ids: set = set()
-        for ann in target_anns:
+        used_v2ex_ids: set = set()
+        for cand in targets:
             got = enricher.enrich_article_with_comments(
-                ann, max_per_source=5, used_story_ids=used_story_ids, days_window=args.days
+                cand, max_per_source=5, used_story_ids=used_story_ids,
+                days_window=args.days, used_v2ex_ids=used_v2ex_ids,
             )
             if got:
-                t = ann.get("_tier", "unknown")
-                enriched_per_tier[t] = enriched_per_tier.get(t, 0) + 1
+                enriched_count += 1
+                # Recompute engagement now that a located thread can lift flat news
+                cand["_engagement"] = engagement_score(cand)
                 logger.debug(
-                    f"  ✚ {len(got)} comments → [{ann.get('_tier')}] '{ann.get('title','')[:60]}'"
+                    f"  ✚ {len(got)} comments → (eng={cand['_engagement']}) "
+                    f"'{cand.get('title','')[:60]}'"
                 )
-        total_enriched = sum(enriched_per_tier.values())
         logger.info(
-            f"Enrichment: attached comments to {total_enriched}/{len(target_anns)} announcements "
-            f"({enriched_per_tier})"
+            f"Enrichment: attached comments to {enriched_count}/{len(targets)} candidates"
         )
+
+    # ── Floating threads = redefined 跨事件社区反馈 ──
+    # High-engagement DISCUSSION threads not paired under any announcement, each
+    # anchored to a concrete URL + counts + scraped comments. This is the honest
+    # replacement for the old vague "cross-event vibes" section.
+    paired_keys: set = set()
+    for ann in announcements:
+        for r in ann.get("reactions", []) or []:
+            paired_keys.add(r.get("link") or r.get("url") or r.get("title", ""))
+    floating_threads = [
+        a for a in reactions
+        if (a.get("link") or a.get("url") or a.get("title", "")) not in paired_keys
+        and (a.get("enriched_comments") or a.get("_engagement", 0.0) >= 2.0)
+    ]
+    floating_threads.sort(key=lambda x: x.get("_engagement", 0.0), reverse=True)
+    floating_threads = floating_threads[:12]
 
     # Regroup into topics (same schema as merge-sources output)
     topics_grouped = regroup_by_topic(merged)
-
-    # Optional: pull rendered daily reports as supplementary context for the
-    # agent. Looks in --archive-dir (works in both fetch-now and accumulated
-    # modes — fetch-now mode previously ignored archive-dir; now it's used
-    # only for daily-report context, not as a data source). Empty list when
-    # --archive-dir is not provided or contains no in-window daily-*.md files.
-    daily_reports = collect_daily_reports(args.archive_dir, args.days) if args.archive_dir else []
-    if daily_reports:
-        logger.info(
-            f"Daily-report context: loaded {len(daily_reports)} reports "
-            f"({daily_reports[0]['date']} → {daily_reports[-1]['date']})"
-        )
-    else:
-        logger.info(
-            "Daily-report context: none available "
-            f"({'archive-dir not provided' if not args.archive_dir else f'no daily-*.md within {args.days}d under {args.archive_dir}'})"
-        )
 
     # Build output JSON
     output_data = {
@@ -1177,14 +1349,14 @@ def main() -> int:
             "announcements_count": len(announcements),
             "reactions_count": len(reactions),
             "tier_distribution": tier_counts,
-            "enriched_tiers_requested": sorted(enrich_tiers) if enrich_tiers else [],
-            "enriched_by_tier": enriched_per_tier,
+            "engagement_top_n": top_n,
+            "enriched_count": enriched_count,
+            "floating_threads_count": len(floating_threads),
             "topics_count": len(topics_grouped),
             "topic_distribution": {tid: data["count"] for tid, data in topics_grouped.items()},
-            "daily_reports_available": len(daily_reports),
             "trendradar_status": _collect_trendradar_status(args.trendradar_dir, args.days),
         },
-        "daily_reports_context": daily_reports,
+        "floating_threads": floating_threads,
         "topics": topics_grouped,
     }
 
@@ -1195,7 +1367,7 @@ def main() -> int:
 
     # Optionally render markdown
     if args.markdown:
-        md = render_markdown(merged, topics_grouped, len(daily_files), args.days, fetch_now=args.fetch_now)
+        md = render_markdown(merged, topics_grouped, len(daily_files), args.days, fetch_now=args.fetch_now, floating_threads=floating_threads)
         args.markdown.parent.mkdir(parents=True, exist_ok=True)
         args.markdown.write_text(md, encoding="utf-8")
         logger.info(f"📝 Weekly markdown → {args.markdown}")

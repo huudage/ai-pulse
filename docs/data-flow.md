@@ -43,7 +43,6 @@
   │     fetch-twitter.py (OpenCLI 后端)
   │     fetch-github.py
   │     fetch-trending.py
-  │     fetch-reddit.py
   │     fetch-web.py     (Tavily/Brave)
   │     fetch-podcast.py
   │
@@ -74,76 +73,74 @@
 
 ```
 ═══════════════════════════════════════════════════════════════
-  Step 1: weekly-feedback.py 跨日聚合
+  Step 1: weekly-feedback.py 现抓 7 天 + 互动热度聚合
 ═══════════════════════════════════════════════════════════════
 
   python3 scripts/weekly-feedback.py \
-    --archive-dir workspace/archive/follow-news \
+    --fetch-now \
+    --trendradar-dir <path>/trendradar \
     --days 7 \
     --output /tmp/td-weekly-merged.json \
     --markdown /tmp/td-weekly.md \
-    --enrich-tier1
+    --enrich-top 20
   │
-  ├─► collect_daily_files() 找出最近 7 天 daily-json/*.json
-  │
-  ├─► flatten_daily_json() 把所有 topics[*].articles 摊平
-  │     ~7 × 400 = ~2800 篇候选文章
+  ├─► fetch_now() 现抓 7 天英文源 + 现爬 TrendRadar 今日快照
+  │     （自给自足，不依赖 daily-json 累积；有累积则中文热榜段更厚）
   │
   ├─► merge-sources.deduplicate_articles()
-  │     跨日 URL 归一化去重 → ~700 篇
+  │     跨日 URL 归一化去重
   │
   ├─► merge-sources.merge_article_sources()
   │     跨日多源识别（同一事件多平台多日报道）
   │     multi_source / source_count / all_sources 重新计算
   │
   ├─► classify_article() — 三分类
-  │     announcement: github / podcast / priority RSS + release 词
-  │     reaction:     reddit / twitter / web / HN-like RSS
-  │     neutral:      其他
+  │     news:       github / podcast / priority RSS + release 词
+  │     discussion: twitter / web / HN-like RSS（标题+正文进候选池，一等舆论）
+  │     neutral:    其他
   │
-  ├─► assign_tier() — Tier 启发式 ★
-  │     tierX:  标题党 (震惊/刚刚！/太可怕 等)
-  │     tier1:  匹配 35+ Tier1 厂商正则
-  │             OR source_count >= 3
-  │             OR quality_score >= 22
-  │     tier2:  multi_source AND source_count >= 2
-  │             OR quality_score >= 15
-  │     tier3:  其余 announcement
+  ├─► engagement_score() — 互动热度评分 ★（入选与排序的唯一依据）
+  │     HN points+评论 / Twitter 互动 /
+  │     中文热榜排名+抓取次数 / 多源覆盖的 log-damped 加性归一
+  │     厂商正则仅作 ×1.25 加成（不再是门槛）；SDK/clickbait 降权
+  │     结果存 _engagement；assign_tier 保留但仅作 _tier 提示，不决定抓评论
+  │
+  ├─► dedup_same_project() 合并同项目连续版本
   │
   ├─► pair_reactions() — 配对
-  │     每个 announcement 找 ≤ 5 个 reactions
-  │     共享 normalized_title bucket、同 primary_topic
+  │     每条 news 抽 ≤6 anchor，discussion 命中 anchor 才配对
   │     时间晚于 announcement
   │
-  └─► （可选 --enrich-tier1）enrich_comments.py ★
-        对 Tier 1 的 announcement 和它的 reactions
-        若 URL 在 news.ycombinator.com → 抓 HN Top 评论
-        若 URL 在 reddit.com → 抓 Reddit Top 评论
-        注入 article["enriched_comments"]
+  └─► enrich_comments.py ★（对热度 Top-N 候选，news+discussion 混合）
+        直链 / 品牌主动搜索 → HN Algolia、V2EX sov2ex ES
+        抓回评论原文注入 article["enriched_comments"]
+        未挂到任何公告的高热讨论串 → 顶层 floating_threads 数组
 
 ═══════════════════════════════════════════════════════════════
   Step 2: 输出
 ═══════════════════════════════════════════════════════════════
 
   /tmp/td-weekly-merged.json
-        ↓ summarize-merged.py 渲染（结构化文本）
+        候选按 _engagement 降序 + floating_threads + output_stats
+        （engagement_top_n / enriched_count / floating_threads_count）
   /tmp/td-weekly.md（备份）
 
 ═══════════════════════════════════════════════════════════════
   Step 3: OpenClaw 周报呈现
 ═══════════════════════════════════════════════════════════════
 
-  你说"本周 AI 圈竞品监控周报" → agent 看 SKILL.md 路由 5
-  → 跑 weekly-feedback.py --enrich-tier1
+  你说"本周 AI 圈周报 / weekly" → agent 匹配 ai-pulse-weekly skill
+  → 跑 weekly.sh（内部 weekly-feedback.py --fetch-now --enrich-top 20）
   → 读 references/prompts/competitor-monitor.md（强制）★
   → 按规则做：
-      1. 复议 _tier（必要时上调/下调）
-      2. 三维度（模型/工程架构/Agent）分类 Tier 1 事件
-      3. 每个 Tier 1 事件回答 5 个问题
-      4. 引用 enriched_comments 里的 HN/Reddit 原文
-      5. 写国内外横切观察段
+      1. 社区讨论量为入选硬门槛，按 _engagement 降序选题（不评 Tier）
+      2. 按情绪分组（👍 正面 / 👎 负面 / ⚖️ 争议 / 🇨🇳 中文视角）
+      3. 引用 enriched_comments 里的 HN/V2EX 逐字原文（带 👍 数）
+      4. 🌐 跨事件社区反馈大章：渲染 floating_threads（带链接+计数）
   → 输出自然语言周报给你
+  （竞品官方动态 + KOL 已迁至 competitor-brief.py，见竞品调研数据流）
 ```
+
 
 ---
 
@@ -184,7 +181,6 @@ follow-news/
 | TrendRadar 热榜 | 当前快照 | NewsNow API 实时 |
 | follow-news RSS | 24-48 小时 | `--hours 24` |
 | follow-news Twitter | 24 小时 | OpenCLI 默认 |
-| follow-news Reddit | 24-48 小时（hot listing） | API 限制 |
 | follow-news GitHub | 14 天 release | 内置 |
 | follow-news Web 搜索 | 24 小时 | `--freshness pd` |
 | 周报数据底盘 | 7 天 daily JSON | `--days 7` |

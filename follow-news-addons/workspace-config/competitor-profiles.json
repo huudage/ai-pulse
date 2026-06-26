@@ -1,0 +1,507 @@
+{
+  "_comment": "国产 Agent 竞品监测档案。增删产品或调整官方源仅改此文件，不改主流程代码（FR-001/SC-007）。official_sources 子项逐项可选：未知的源填 null，用户后续补全 URL/选择器/App Store ID。github_repo 用 'owner/repo'；app_store_id 用 Apple 数字 ID。schema 见 specs/006-domestic-agent-monitor/contracts/competitor-profile.md。注（2026-06 实测）：MarsCode / 通义灵码 / 文心快码 Comate / CodeBuddy / Fitten Code 官网均为 SPA（首屏无静态 changelog，css 选择器抓取得 ok(0)），且无公开 GitHub releases；laiye.com sitemap 的 lastmod 全为构建当天日期（无效信号），故留 null 不填猜测源，靠 KOL 兜底。腾讯文档 AI 经 App Store id=1370780836（腾讯文档主 app）补全。",
+  "profiles": [
+    {
+      "name": "Trae",
+      "aliases": [
+        "Trae",
+        "字节 Trae",
+        "Trae IDE"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "Trae-AI/TRAE",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "MarsCode",
+      "aliases": [
+        "MarsCode",
+        "豆包 MarsCode",
+        "字节 MarsCode"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "通义灵码",
+      "aliases": [
+        "通义灵码",
+        "TONGYI Lingma",
+        "Lingma",
+        "阿里灵码"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "文心快码 Comate",
+      "aliases": [
+        "文心快码",
+        "Comate",
+        "百度 Comate"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "CodeGeeX",
+      "aliases": [
+        "CodeGeeX",
+        "智谱 CodeGeeX"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "zai-org/CodeGeeX4",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "CodeBuddy",
+      "aliases": [
+        "CodeBuddy",
+        "腾讯 CodeBuddy"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "Fitten Code",
+      "aliases": [
+        "Fitten Code",
+        "Fitten"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "aiXcoder",
+      "aliases": [
+        "aiXcoder"
+      ],
+      "category": "coding",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "aixcoder-plugin/aiXcoder-7B",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "Manus",
+      "aliases": [
+        "Manus",
+        "Manus AI"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": "https://manus.im/sitemap.xml",
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "扣子 Coze",
+      "aliases": [
+        "扣子",
+        "Coze",
+        "字节 Coze"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6747420043",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "豆包",
+      "aliases": [
+        "豆包",
+        "Doubao",
+        "字节豆包"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6459478672",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "智谱清言 / AutoGLM",
+      "aliases": [
+        "智谱清言",
+        "清言",
+        "AutoGLM",
+        "ChatGLM",
+        "智谱"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "zai-org/GLM-4.5",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "Kimi",
+      "aliases": [
+        "Kimi",
+        "月之暗面",
+        "Moonshot",
+        "Kimi Chat"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "MoonshotAI/Kimi-K2",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6474233312",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "DeepSeek",
+      "aliases": [
+        "DeepSeek",
+        "深度求索"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "deepseek-ai/DeepSeek-V3",
+        "changelog_url": "https://api-docs.deepseek.com/updates",
+        "css_selector": "h2",
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "腾讯元宝",
+      "aliases": [
+        "腾讯元宝",
+        "元宝",
+        "混元",
+        "Hunyuan"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "Tencent-Hunyuan/Hy3-preview",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6480446430",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "跃问 Step",
+      "aliases": [
+        "跃问",
+        "Step",
+        "阶跃星辰",
+        "StepFun"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "stepfun-ai/Step-3.5-Flash",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "海螺 MiniMax",
+      "aliases": [
+        "海螺",
+        "MiniMax",
+        "海螺 AI"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": "MiniMax-AI/MiniMax-M2",
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": "https://platform.minimaxi.com/sitemap-0.xml",
+        "app_store_id": "6742046771",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "讯飞星火",
+      "aliases": [
+        "讯飞星火",
+        "星火",
+        "科大讯飞",
+        "iFlytek Spark"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6449919551",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "秘塔 AI 搜索",
+      "aliases": [
+        "秘塔",
+        "秘塔 AI",
+        "metaso"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6478196963",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "纳米 AI / 360 智脑",
+      "aliases": [
+        "纳米 AI",
+        "360 智脑",
+        "360 AI"
+      ],
+      "category": "general_agent",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "6737763506",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "WorkBuddy",
+      "aliases": [
+        "WorkBuddy",
+        "Work Buddy"
+      ],
+      "category": "office",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "钉钉 AI 助理",
+      "aliases": [
+        "钉钉 AI",
+        "钉钉个人版",
+        "DingTalk AI"
+      ],
+      "category": "office",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "930368978",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "飞书智能伙伴 / Aily",
+      "aliases": [
+        "飞书智能伙伴",
+        "Aily",
+        "飞书 AI",
+        "Lark AI"
+      ],
+      "category": "office",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "1401729613",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "WPS AI",
+      "aliases": [
+        "WPS AI",
+        "金山 WPS AI"
+      ],
+      "category": "office",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "599852710",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "腾讯文档 AI",
+      "aliases": [
+        "腾讯文档 AI",
+        "腾讯文档智能助手"
+      ],
+      "category": "office",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": "1370780836",
+        "rss_url": null
+      }
+    },
+    {
+      "name": "实在智能 TARS",
+      "aliases": [
+        "实在智能",
+        "TARS",
+        "实在 TARS"
+      ],
+      "category": "rpa",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "影刀 RPA",
+      "aliases": [
+        "影刀",
+        "影刀 RPA",
+        "YingDao"
+      ],
+      "category": "rpa",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": "https://www.yingdao.com/sitemap.xml",
+        "app_store_id": null,
+        "rss_url": null
+      }
+    },
+    {
+      "name": "来也 Laiye",
+      "aliases": [
+        "来也",
+        "Laiye",
+        "来也科技"
+      ],
+      "category": "rpa",
+      "enabled": true,
+      "official_sources": {
+        "github_repo": null,
+        "changelog_url": null,
+        "css_selector": null,
+        "docs_sitemap_url": null,
+        "app_store_id": null,
+        "rss_url": null
+      }
+    }
+  ]
+}

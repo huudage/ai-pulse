@@ -3,7 +3,8 @@
 Topic feedback search — 单主题社区反馈检索
 
 Given a user-provided topic (e.g. "Cursor agent mode"), concurrently search
-Hacker News, Reddit, Twitter (best-effort), and TrendRadar Chinese hot lists
+Hacker News, Twitter (best-effort), V2EX, KOL platforms, and TrendRadar
+Chinese hot lists
 for community discussion in the last N days. Output a structured JSON + a
 companion markdown digest for OpenClaw agent to write the final Chinese report.
 
@@ -42,11 +43,6 @@ CACHE_DIR = Path(tempfile.gettempdir()) / "topic-feedback-cache"
 USER_AGENT = "FollowNews/3.0 (topic-feedback bot)"
 TIMEOUT = 15
 _SSL_CTX = ssl.create_default_context()
-
-REDDIT_AI_SUBS = {
-    "LocalLLaMA", "OpenAI", "ChatGPT", "MachineLearning",
-    "ArtificialInteligence", "singularity", "ChatGPTCoding", "PromptEngineering",
-}
 
 logger = logging.getLogger("topic-feedback")
 
@@ -137,7 +133,7 @@ def search_hn(query: str, days: int, enrich: bool) -> Dict[str, Any]:
             "top_comments": [],
         })
 
-    # Sort by points desc, then enrich top 3
+    # Sort by points desc, then enrich top 5
     results.sort(key=lambda r: r.get("points") or 0, reverse=True)
 
     if enrich and results:
@@ -146,102 +142,13 @@ def search_hn(query: str, days: int, enrich: bool) -> Dict[str, Any]:
             enricher_path = SCRIPTS_DIR / "enrich_comments.py"
             if enricher_path.exists():
                 enricher = SourceFileLoader("enrich_comments", str(enricher_path)).load_module()
-                for r in results[:3]:
-                    r["top_comments"] = enricher._fetch_hn_story_comments(r["story_id"], 3)
+                for r in results[:5]:
+                    r["top_comments"] = enricher._fetch_hn_story_comments(r["story_id"], 5)
         except Exception as e:
             logger.debug(f"HN comment enrichment failed: {e}")
 
     out = {"status": "ok", "count": len(results), "results": results}
     cache_put("hn", f"{query}|{days}|{enrich}", out)
-    return out
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Reddit search
-# ────────────────────────────────────────────────────────────────────────────
-
-def search_reddit(query: str, days: int) -> Dict[str, Any]:
-    cached = cache_get("reddit", f"{query}|{days}")
-    if cached is not None:
-        return cached
-
-    fr_path = SCRIPTS_DIR / "fetch-reddit.py"
-    if not fr_path.exists():
-        return {"status": "skipped: fetch-reddit.py not found in scripts dir", "count": 0, "results": []}
-
-    try:
-        from importlib.machinery import SourceFileLoader
-        fr = SourceFileLoader("fetch_reddit", str(fr_path)).load_module()
-    except Exception as e:
-        return {"status": f"skipped: failed to load fetch-reddit.py: {e}", "count": 0, "results": []}
-
-    token = fr._get_reddit_oauth_token()
-    if not token:
-        reason = fr._OAUTH_DISABLED_REASON or "REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET not set"
-        return {"status": f"skipped: {reason}", "count": 0, "results": []}
-
-    # Time filter: Reddit's `t` only supports week/month/year; pick closest.
-    if days <= 7:
-        t = "week"
-    elif days <= 31:
-        t = "month"
-    else:
-        t = "year"
-
-    params = {
-        "q": query,
-        "sort": "relevance",
-        "t": t,
-        "limit": 50,
-        "raw_json": 1,
-    }
-    url = f"https://oauth.reddit.com/search.json?{urlencode(params)}"
-
-    try:
-        req = Request(url, headers={
-            "User-Agent": USER_AGENT,
-            "Authorization": f"bearer {token}",
-            "Accept": "application/json",
-        })
-        with urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except (HTTPError, URLError, json.JSONDecodeError, TimeoutError) as e:
-        return {"status": f"error: {e}", "count": 0, "results": []}
-
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
-    children = data.get("data", {}).get("children", [])
-    results: List[Dict[str, Any]] = []
-    for child in children:
-        post = child.get("data") or {}
-        created = post.get("created_utc") or 0
-        if created < cutoff:
-            continue
-        title = (post.get("title") or "").strip()
-        if not title:
-            continue
-
-        sub = post.get("subreddit") or ""
-        score = post.get("score") or 0
-        weighted = score * 1.3 if sub in REDDIT_AI_SUBS else float(score)
-
-        results.append({
-            "title": title,
-            "subreddit": sub,
-            "is_ai_sub": sub in REDDIT_AI_SUBS,
-            "url": f"https://www.reddit.com{post.get('permalink', '')}",
-            "external_url": post.get("url") if not post.get("is_self") else None,
-            "score": score,
-            "weighted_score": round(weighted, 1),
-            "num_comments": post.get("num_comments") or 0,
-            "upvote_ratio": post.get("upvote_ratio") or 0,
-            "created_at": datetime.fromtimestamp(created, tz=timezone.utc).isoformat(),
-            "author": post.get("author") or "",
-            "selftext": (post.get("selftext") or "")[:500],
-        })
-
-    results.sort(key=lambda r: r["weighted_score"], reverse=True)
-    out = {"status": "ok", "count": len(results), "results": results}
-    cache_put("reddit", f"{query}|{days}", out)
     return out
 
 
@@ -383,6 +290,139 @@ def search_trendradar(query: str, trendradar_dir: Path, days: int) -> Dict[str, 
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# V2EX search (zero-auth: sov2ex ES index + V2EX v1 reply API)
+# ────────────────────────────────────────────────────────────────────────────
+
+def search_v2ex(query: str, days: int) -> Dict[str, Any]:
+    cached = cache_get("v2ex", f"{query}|{days}")
+    if cached is not None:
+        return cached
+
+    enricher_path = SCRIPTS_DIR / "enrich_comments.py"
+    if not enricher_path.exists():
+        return {"status": "skipped: enrich_comments.py not found in scripts dir",
+                "count": 0, "results": []}
+    try:
+        from importlib.machinery import SourceFileLoader
+        enricher = SourceFileLoader("enrich_comments", str(enricher_path)).load_module()
+    except Exception as e:
+        return {"status": f"skipped: failed to load enrich_comments.py: {e}",
+                "count": 0, "results": []}
+
+    # sov2ex has no first-party recency filter; Chinese communities lag the
+    # English news cycle, so accept topics up to 90 days old (matches the
+    # weekly enricher's find_v2ex_topic_by_brand default).
+    max_age = max(days, 90)
+    min_replies = 2
+    try:
+        payload = enricher._http_get_json(
+            enricher.SOV2EX_SEARCH.format(query=quote(query))
+        )
+    except Exception as e:
+        return {"status": f"error: {e}", "count": 0, "results": []}
+
+    if not payload:
+        return {"status": "error: empty sov2ex response", "count": 0, "results": []}
+
+    cutoff = time.time() - max_age * 86400
+    query_lc = query.lower()
+    scored: List[tuple] = []
+    for h in payload.get("hits") or []:
+        src = h.get("_source") or {}
+        tid = src.get("id")
+        if not tid:
+            continue
+        replies = int(src.get("replies") or 0)
+        if replies < min_replies:
+            continue
+        haystack = f"{src.get('title','')} {src.get('content','')}".lower()
+        if query_lc not in haystack:
+            continue
+        created = src.get("created") or ""
+        if created:
+            try:
+                ts = time.mktime(time.strptime(created[:19], "%Y-%m-%dT%H:%M:%S"))
+                if ts < cutoff:
+                    continue
+            except (ValueError, OverflowError):
+                pass
+        scored.append((replies, str(tid), src.get("title", "")))
+
+    scored.sort(reverse=True)  # most-replied first
+    results: List[Dict[str, Any]] = []
+    for replies, tid, title in scored[:5]:
+        try:
+            comments = enricher.fetch_v2ex_comments(tid, 5)
+        except Exception as e:
+            logger.debug(f"V2EX comment fetch failed for topic {tid}: {e}")
+            comments = []
+        topic_url = comments[0]["url"] if comments else f"https://www.v2ex.com/t/{tid}"
+        results.append({
+            "title": title,
+            "url": topic_url,
+            "topic_id": tid,
+            "replies": replies,
+            "comments": comments,
+        })
+
+    out = {"status": "ok", "count": len(results), "results": results}
+    cache_put("v2ex", f"{query}|{days}", out)
+    return out
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# KOL search (subprocess → fetch-competitor-kol.py --query, profiles-free)
+# ────────────────────────────────────────────────────────────────────────────
+
+def search_kol(query: str, days: int) -> Dict[str, Any]:
+    """Run fetch-competitor-kol.py in keyword mode and return tagged kol_contents.
+
+    Mirrors competitor-brief._collect_kol_best_effort: isolated subprocess with a
+    PYTHONUTF8 child env so Windows GBK/path quirks can't corrupt Chinese text or
+    crash the parent. Bilibili is anonymous (risk-gate permitting); 知乎/即刻/公众号
+    need user creds and soft-degrade to coverage=skip. Any failure → empty."""
+    script = SCRIPTS_DIR / "fetch-competitor-kol.py"
+    if not script.exists():
+        return {"status": "skipped: fetch-competitor-kol.py not found in scripts dir",
+                "count": 0, "results": [], "coverage": []}
+
+    child_env = os.environ.copy()
+    child_env["PYTHONUTF8"] = "1"
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    out_tmp = Path(tempfile.gettempdir()) / f"topic-kol-{hashlib.sha256(query.encode()).hexdigest()[:12]}.json"
+    try:
+        out_tmp.unlink()  # avoid reading a stale file if the subprocess fails to write
+    except FileNotFoundError:
+        pass
+    cmd = [sys.executable, str(script),
+           "--query", query,
+           "--window-days", str(days),
+           "--platforms", "bilibili,zhihu,jike,weixin",
+           "--out", str(out_tmp)]
+    try:
+        subprocess.run(cmd, check=False, timeout=900, env=child_env,
+                       capture_output=True, text=True)
+    except subprocess.TimeoutExpired:
+        return {"status": "error: KOL subprocess timed out after 900s",
+                "count": 0, "results": [], "coverage": []}
+    except Exception as e:
+        return {"status": f"error: {e}", "count": 0, "results": [], "coverage": []}
+
+    if not out_tmp.exists():
+        return {"status": "error: KOL subprocess produced no output file",
+                "count": 0, "results": [], "coverage": []}
+    try:
+        data = json.loads(out_tmp.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"status": f"error: KOL output not JSON: {e}",
+                "count": 0, "results": [], "coverage": []}
+
+    contents = data.get("kol_contents", []) or []
+    coverage = data.get("coverage", []) or []
+    return {"status": "ok", "count": len(contents), "results": contents, "coverage": coverage}
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Markdown rendering (companion to JSON)
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -421,24 +461,6 @@ def render_markdown(payload: Dict[str, Any]) -> str:
             lines.append(f"  - **[hn] {c.get('author', '')}**: {content}")
     lines.append("")
 
-    # Reddit
-    rd = sources.get("reddit", {})
-    lines.append(f"## Reddit  ({rd.get('count', 0)} 条)")
-    lines.append(f"_{rd.get('status', '')}_")
-    for r in rd.get("results", [])[:25]:
-        marker = " 🤖" if r.get("is_ai_sub") else ""
-        lines.append("")
-        lines.append(f"### r/{r['subreddit']}{marker}: {r['title']}")
-        lines.append(
-            f"- 👍 {r.get('score', 0)} (加权 {r.get('weighted_score', 0)}) "
-            f"· 💬 {r.get('num_comments', 0)} · @{r.get('author', '')}"
-        )
-        lines.append(f"- 链接: {r['url']}")
-        if r.get("selftext"):
-            text = r["selftext"].replace("\n", " ")[:300]
-            lines.append(f"- 正文摘要: {text}")
-    lines.append("")
-
     # Twitter
     tw = sources.get("twitter", {})
     lines.append(f"## Twitter / X  ({tw.get('count', 0)} 条)")
@@ -464,6 +486,44 @@ def render_markdown(payload: Dict[str, Any]) -> str:
             lines.append(f"  - 原文: {r['url']}")
     lines.append("")
 
+    # V2EX
+    v2 = sources.get("v2ex", {})
+    lines.append(f"## V2EX 中文技术社区  ({v2.get('count', 0)} 条)")
+    lines.append(f"_{v2.get('status', '')}_")
+    for r in v2.get("results", []):
+        lines.append("")
+        lines.append(f"### {r.get('title', '')}")
+        lines.append(f"- 💬 {r.get('replies', 0)} 回复 · 主题 #{r.get('topic_id', '')}")
+        if r.get("url"):
+            lines.append(f"- 原文: {r['url']}")
+        for c in r.get("comments", []):
+            content = (c.get("content") or "").replace("\n", " ")[:300]
+            lines.append(f"  - **[v2ex] {c.get('author', '')}**: {content}")
+    lines.append("")
+
+    # KOL
+    kol = sources.get("kol", {})
+    lines.append(f"## KOL 行业/岗位场景  ({kol.get('count', 0)} 条)")
+    lines.append(f"_{kol.get('status', '')}_")
+    cov = kol.get("coverage", [])
+    if cov:
+        cov_parts = []
+        for row in cov:
+            for k, v in row.items():
+                if k in ("query", "note"):
+                    continue
+                cov_parts.append(f"{k}={v}")
+        if cov_parts:
+            lines.append(f"- 平台覆盖: {' · '.join(cov_parts)}")
+    for k in kol.get("results", [])[:20]:
+        tags = "/".join(k.get("industry_tags", []) + k.get("role_scene_tags", []))
+        lines.append("")
+        lines.append(f"- **[{k.get('platform', '?')}]** {k.get('title', '')}"
+                     + (f"  ({tags})" if tags else ""))
+        if k.get("url"):
+            lines.append(f"  - 原文: {k['url']}")
+    lines.append("")
+
     return "\n".join(lines)
 
 
@@ -473,7 +533,7 @@ def render_markdown(payload: Dict[str, Any]) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Topic feedback search across HN / Reddit / Twitter / TrendRadar CN",
+        description="Topic feedback search across HN / Twitter / V2EX / KOL / TrendRadar CN",
     )
     parser.add_argument("--query", required=True, help="Topic keyword(s) to search for, e.g. 'Cursor agent mode'")
     parser.add_argument("--days", type=int, default=30, help="Time window in days (default: 30)")
@@ -482,7 +542,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--output", type=Path, required=True, help="Output JSON path")
     parser.add_argument("--markdown", type=Path, default=None, help="Output markdown path (optional)")
     parser.add_argument("--enrich-hn-comments", action="store_true",
-                        help="Fetch top 3 comments for top 3 HN stories (extra ~10s wall time)")
+                        help="(deprecated no-op) HN/V2EX comment text is now fetched by default; "
+                             "kept for back-compat. Use --no-comments to opt out.")
+    parser.add_argument("--no-comments", action="store_true",
+                        help="Skip fetching HN/V2EX comment text (titles + metadata only, faster)")
     parser.add_argument("--no-cache", action="store_true", help="Bypass 10-min TTL cache")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -504,16 +567,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info(f"🔍 Topic: '{query}' · 窗口: {args.days} 天")
 
+    enrich = not args.no_comments
     workers = {
-        "hn":            lambda: search_hn(query, args.days, args.enrich_hn_comments),
-        "reddit":        lambda: search_reddit(query, args.days),
+        "hn":            lambda: search_hn(query, args.days, enrich),
         "twitter":       lambda: search_twitter(query),
         "trendradar_cn": lambda: search_trendradar(query, args.trendradar_dir, days=7),
+        "v2ex":          lambda: search_v2ex(query, args.days) if enrich else {"status": "skipped: --no-comments", "count": 0, "results": []},
+        "kol":           lambda: search_kol(query, args.days),
     }
 
     sources: Dict[str, Any] = {}
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futures = {ex.submit(fn): name for name, fn in workers.items()}
         for fut in as_completed(futures):
             name = futures[fut]

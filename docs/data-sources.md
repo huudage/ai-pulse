@@ -50,7 +50,7 @@
 
 完整列表在 follow-news 仓的 `config/defaults/sources.json` 中，按 `"type": "rss"` 过滤。
 
-### B.2 Twitter/X KOL — 60 个（部分代表）
+### B.2 Twitter/X — 68 个（部分代表）
 
 | 类别 | 代表账号 |
 |---|---|
@@ -60,6 +60,7 @@
 | VC/创业者 | @paulg、@garrytan、@brian_armstrong |
 | 中文 | @dotey、@op7418、@aiwanderer |
 | Agent/Builder | @amasad、@PatrickCollison |
+| 国产竞品官方 | @deepseek_ai、@Kimi_Moonshot、@alibaba_qwen、@MiniMax_AI、@Zai_org、@StepFun_ai、@manusai（均联网核实官方 handle） |
 
 **抓取后端推荐**：OpenCLI（复用浏览器登录态，零鉴权），fallback 到 GetXAPI / twitterapi.io / 官方 X API。
 
@@ -75,20 +76,7 @@
 
 完整列表在 `config/defaults/sources.json` 按 `"type": "github"` 过滤。
 
-### B.4 Reddit — 8 个 subreddit
-
-| Subreddit | 关注点 |
-|---|---|
-| r/MachineLearning | 学术/研究讨论 |
-| r/LocalLLaMA | 本地大模型部署、量化、推理 |
-| r/OpenAI | OpenAI 产品讨论 |
-| r/ChatGPT | ChatGPT 用户社区 |
-| r/Anthropic | Claude 讨论 |
-| r/singularity | AGI / 行业趋势 |
-| r/ArtificialInteligence | AI 通用 |
-| r/ExperiencedDevs | 资深开发者视角的 AI 工具讨论 |
-
-### B.5 Web 搜索 — 6 主题
+### B.4 Web 搜索 — 6 主题
 
 通过 Tavily 或 Brave Search API（需 API key），按主题词搜索，**带时效过滤**（默认 24h）：
 
@@ -101,11 +89,11 @@
 | `frontier-tech` | AI policy, AI governance, AI safety, AI regulation |
 | `podcast` | AI podcast episode |
 
-### B.6 播客 — 自定义
+### B.5 播客 — 自定义
 
 支持 RSS 播客订阅源 + YouTube 播放列表/频道。可选 `yt-dlp` 抓元数据和转录文本。
 
-### B.7 TrendRadar 中文 RSS（旁路注入）— 1 个
+### B.6 TrendRadar 中文 RSS（旁路注入）— 1 个
 
 通过 `workspace/config/follow-news-sources.json` 注册，URL 为 `file:///path/to/TrendRadar/output/rss/ai_focus.xml`，topics 标记为 `["llm", "frontier-tech"]`、`priority: true`（质量评分 +3）。
 
@@ -131,13 +119,13 @@
 
 ```
 TrendRadar:      11 个中文平台
-follow-news:     65 RSS + 60 Twitter + 23 GitHub + 8 Reddit + 6 Web 主题 + N 播客
-                 = 162+ 个
+follow-news:     64 RSS + 68 Twitter + 23 GitHub + 6 Web 主题 + 6 播客
+                 = 167 个
 TrendRadar RSS（注入 follow-news）: 1 个
 ────────────────────────────────
-合计:            165+ 个信源
+合计:            179 个信源
 ```
 
 每天大致经过：**抓取 → 去重 → 多源加分 → topic 分组**，输出约 400-500 篇文章（视当日热度）。
 
-经过 **AI 关键词过滤 + Tier 启发式** 后，进入周报视野的通常是 **20-60 篇 announcement**，其中 Tier 1 通常 **3-10 篇**，每篇配 ≤5 个 reactions + Tier 1 额外的 HN/Reddit 评论原文。
+经过 **AI 关键词过滤 + Tier 启发式** 后，进入周报视野的通常是 **20-60 篇 announcement**，其中 Tier 1 通常 **3-10 篇**，每篇配 ≤5 个 reactions + Tier 1 额外的 HN/V2EX 评论原文。

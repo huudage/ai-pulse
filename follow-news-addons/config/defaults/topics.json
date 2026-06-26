@@ -1,0 +1,103 @@
+{
+  "_description": "Enhanced topic definitions for tech digest. Each topic defines a report section with search queries, filters, and display preferences.",
+  "_updated": "2026-02-15",
+  "_version": "2.5.0",
+  "topics": [
+    {
+      "id": "llm",
+      "emoji": "🧠",
+      "label": "LLM / 大模型",
+      "description": "Large language models, foundation models, model releases, benchmarks, inference, and model capability changes",
+      "search": {
+        "queries": ["LLM latest news", "large language model breakthroughs", "大模型最新动态", "GPT Claude Gemini updates"],
+        "twitter_queries": ["GPT-5", "Claude", "大模型"],
+        "must_include": ["LLM", "large language model", "foundation model", "language model", "LLM release", "LLM benchmark", "LLM inference", "大模型"],
+        "exclude": ["tutorial", "how to use", "beginner guide"]
+      },
+      "display": {
+        "max_items": 8,
+        "style": "detailed"
+      }
+    },
+    {
+      "id": "ai-agent",
+      "emoji": "🤖",
+      "label": "AI Agent / 智能体",
+      "description": "Autonomous agents, agent frameworks, AI assistants, and agentic AI systems",
+      "search": {
+        "queries": ["AI Agent latest developments", "autonomous agent framework", "AI assistant breakthrough"],
+        "twitter_queries": ["AI agent", "autonomous agent", "AI 智能体"],
+        "must_include": ["AI agent", "autonomous agent", "agent framework", "agentic", "multi-agent", "OpenClaw", "coding agent", "desktop agent", "智能体"],
+        "exclude": ["game agent", "travel agent"]
+      },
+      "display": {
+        "max_items": 6,
+        "style": "compact"
+      }
+    },
+    {
+      "id": "builder",
+      "emoji": "🏗️",
+      "label": "Builder / 构建者",
+      "description": "Founders, operators, and practical execution leaders in AI and software engineering",
+      "search": {
+        "queries": ["AI startup founding", "product launch", "builder mindset", "创业者观点", "AI公司动态"],
+        "twitter_queries": ["AI startup", "产品发布", "创业", "founder"],
+        "must_include": ["founder", "startup", "build", "execution", "company"],
+        "exclude": ["romance", "sports", "entertainment"]
+      },
+      "display": {
+        "max_items": 6,
+        "style": "detailed"
+      }
+    },
+    {
+      "id": "kol",
+      "emoji": "🎤",
+      "label": "KOL / 观点",
+      "description": "Opinion leaders, keynote speakers, and influential commentators in technology",
+      "search": {
+        "queries": ["AI opinion leader", "tech keynote", "industry voice", "KOL", "行业观点"],
+        "twitter_queries": ["技术观点", "tech commentator", "AI opinion", "industry leader"],
+        "must_include": ["opinion", "comment", "speaker", "观点", "leader"],
+        "exclude": ["marketing", "promotional", "sponsored"]
+      },
+      "display": {
+        "max_items": 6,
+        "style": "compact"
+      }
+    },
+    {
+      "id": "frontier-tech",
+      "emoji": "🔬",
+      "label": "Tech Industry / 产业动态",
+      "description": "Technology industry, AI policy, public-sector technology choices, security operations, governance, and emerging technology adoption",
+      "search": {
+        "queries": ["AI industry news", "technology policy latest", "AI governance", "frontier technology latest"],
+        "twitter_queries": ["AI industry", "AI policy", "AI governance", "技术产业"],
+        "must_include": ["policy", "governance", "open source", "public sector", "industry", "security", "technology", "innovation", "quantum", "biotech", "robotics", "AI adoption"],
+        "exclude": ["rumor", "speculation", "unverified"]
+      },
+      "display": {
+        "max_items": 8,
+        "style": "detailed"
+      }
+    },
+    {
+      "id": "podcast",
+      "emoji": "🎧",
+      "label": "Podcast / 播客",
+      "description": "Podcast episodes from configured podcast feeds and YouTube sources",
+      "search": {
+        "queries": [],
+        "twitter_queries": [],
+        "must_include": [],
+        "exclude": []
+      },
+      "display": {
+        "max_items": 8,
+        "style": "compact"
+      }
+    }
+  ]
+}

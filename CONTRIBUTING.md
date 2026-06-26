@@ -104,20 +104,19 @@ OpenClaw 路由 5（"Weekly competitor monitor digest"）和路由 6（"Topic fe
 
 ### 任务 E：调主题反馈检索（topic-feedback）
 
-`topic-feedback.py` 是单主题的 4 路并发社区检索（HN / Reddit / Twitter / TrendRadar 中文），由路由 6 触发。零 LLM key 设计：脚本只做机械搜索，所有语义工作（关键词提取、观点分类、翻译）由 OpenClaw agent 按 `topic-feedback.md` 完成。
+`topic-feedback.py` 是单主题的 5 路并发社区检索（HN / Twitter / TrendRadar 中文 / V2EX / KOL），由路由 6 触发。零 LLM key 设计：脚本只做机械搜索，所有语义工作（关键词提取、观点分类、翻译）由 OpenClaw agent 按 `topic-feedback.md` 完成。
 
 常见调整场景：
 
-1. **Reddit AI 加权 sub 列表** — `follow-news-addons/scripts/topic-feedback.py` 的 `REDDIT_AI_SUBS` 集合。新加 sub 名直接加进去，加权倍数（×1.3）写死在 `search_reddit` 里
-2. **HN 搜索的 story / 评论数量** — 同文件 `search_hn` 函数：默认拉 15 个 story、对前 3 个抓 top 3 评论。改这两个常量看 prompt 数据契约段是否要同步说
-3. **TrendRadar SQLite 检索窗口** — 默认 last 7 个 db 文件（`search_trendradar(query, dir, days=7)`）。改成更长会稳但更慢
-4. **加新源**（例如 Mastodon、bluesky）：
+1. **HN 搜索的 story / 评论数量** — `follow-news-addons/scripts/topic-feedback.py` 的 `search_hn` 函数：默认拉 story、对前 5 个抓 top 5 评论。改这两个常量看 prompt 数据契约段是否要同步说
+2. **TrendRadar SQLite 检索窗口** — 默认 last 7 个 db 文件（`search_trendradar(query, dir, days=7)`）。改成更长会稳但更慢
+3. **加新源**（例如 Mastodon、bluesky）：
    - 在 `topic-feedback.py` 里加 `search_mastodon(query, days)` 函数，返回 `{"status": ..., "count": ..., "results": [...]}`
    - 在 `main()` 的 `workers` dict 里注册新 worker
    - 在 `render_markdown()` 里加新源章节
    - **同时改** `follow-news-addons/references/prompts/topic-feedback.md` 的"输入数据契约"段，列出新源 JSON shape，否则 agent 不知道怎么读
 
-5. **改 Twitter 抓取策略**（当前是 best-effort 探测 `opencli twitter --help`）：如果上游 opencli 加了 `twitter search` 子命令，把 `search_twitter` 里的 `subprocess.run(['opencli', 'twitter', '--help'])` 探测改为直接调用即可。如果改成浏览器抓取，注意保留 `status: "skipped: ..."` 的回退路径
+4. **改 Twitter 抓取策略**（当前是 best-effort 探测 `opencli twitter --help`）：如果上游 opencli 加了 `twitter search` 子命令，把 `search_twitter` 里的 `subprocess.run(['opencli', 'twitter', '--help'])` 探测改为直接调用即可。如果改成浏览器抓取，注意保留 `status: "skipped: ..."` 的回退路径
 
 ⚠ 跟"任务 C"一样的同步纪律：脚本行为和 prompt 描述必须同步改，否则 agent 行为不可预期。
 

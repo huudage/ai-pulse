@@ -1,17 +1,25 @@
-# ai-pulse 自身没有运行时依赖（所有 Python 代码作为 patch / addon 复制到上游仓里）
-# 这里列出的是上游仓 + addon 共同需要的 Python 包。
-# install.sh 会自动安装；如果你 --skip-deps，则手动 pip install -r requirements.txt。
+# ai-pulse 运行时依赖（独立 skill — 引擎与 TrendRadar 已 vendored 进本仓）
+#
+# 本仓自包含：follow-news 引擎在 follow-news-addons/，TrendRadar 在 trendradar/。
+# setup.sh 会自动安装本文件；--skip-deps 时手动 pip install -r requirements.txt。
+#
+# ⚠️ Python ≥ 3.12（TrendRadar requires-python>=3.12）。低版本下中文热榜模块可能无法导入。
 
-# 上游 TrendRadar 依赖（参见 TrendRadar/requirements.txt）
-requests>=2.31.0
-pyyaml>=6.0
-pytz>=2024.1
-litellm>=1.40.0  # TrendRadar 的 AI 翻译/分析/筛选可选用
+# ── TrendRadar 依赖（与 trendradar/requirements.txt 对齐，固定版本保证 import 干净）──
+requests==2.33.0
+pytz==2026.1
+PyYAML==6.0.3
+fastmcp==2.12.5
+websockets==13.1
+feedparser==6.0.12
+boto3==1.42.76
+litellm==1.82.6
+json-repair==0.58.6
+tenacity==8.5.0
 
-# 上游 follow-news 依赖（参见 follow-news/requirements.txt）
-feedparser>=6.0.0
+# ── follow-news 引擎依赖（可选但建议安装；不装时对应能力优雅降级）──
 jsonschema>=4.0.0
 
-# 可选（不装也能跑，按需开启功能）
+# ── 可选（不装也能跑，按需开启功能）──
 # weasyprint>=60.0  # PDF 周报渲染
 # yt-dlp>=2024.1.0   # YouTube 播客元数据 + 转录

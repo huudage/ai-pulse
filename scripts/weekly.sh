@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# 每周聚合 — 现抓 7 天数据 + 启发式 Tier 分级 + HN/Reddit 评论 enrichment
+# 每周聚合 — 现抓 7 天数据 + 互动热度排序 + HN/V2EX 评论 enrichment
 #
 # 行为：
 #   - 触发时现抓 7 天（RSS / GitHub / Web 搜索 / Twitter / 播客）
-#   - 从 TrendRadar SQLite 拉最近 7 天（之前 daily.sh 累积的）
-#   - pool 本周 Reddit daily archive
-#   - 启发式 Tier 1/2/3 预标签（35+ 厂商正则白名单）
-#   - 对 Tier 1 抓 HN/Reddit Top 评论原文（零鉴权 JSON API）
+#   - 从 TrendRadar SQLite 拉最近 7 天（可选 daily.sh 累积的快照；无则现爬今日，照实标注覆盖度）
+#   - 按互动热度（HN points+评论 / 中文热榜排名 / 多源覆盖）排序选题，厂商正则仅作 ×1.25 加成
+#   - 对热度 Top-N 候选抓 HN/V2EX Top 评论原文（零鉴权 JSON API）
 #   - 输出结构化 JSON + markdown 给 OpenClaw agent 后续处理
-#   - agent 读 competitor-monitor.md 后做 4 阶段（语义去重 / 发布验证 / 三维度分类 / 撰写）
+#   - agent 读 competitor-monitor.md 后按社区讨论量选题、按情绪分组撰写（含跨事件社区反馈大章）
 #
 # 用法：
 #   bash weekly.sh
@@ -30,8 +29,8 @@ if [ -f "$DEPLOY_CONFIG" ]; then
     AI_PULSE_DIR_FROM_CONFIG="$AI_PULSE_DIR"
 fi
 
-TRENDRADAR_DIR="${TRENDRADAR_DIR:-$THIS_DIR/../../TrendRadar}"
-FOLLOW_NEWS_DIR="${FOLLOW_NEWS_DIR:-$THIS_DIR/../../follow-news}"
+TRENDRADAR_DIR="${TRENDRADAR_DIR:-$THIS_DIR/../trendradar}"
+FOLLOW_NEWS_DIR="${FOLLOW_NEWS_DIR:-$THIS_DIR/../follow-news-addons}"
 FOLLOW_NEWS_WORKSPACE="${FOLLOW_NEWS_WORKSPACE:-$FOLLOW_NEWS_DIR/workspace}"
 DAYS="${DAYS:-7}"
 OUTPUT="${OUTPUT:-/tmp/td-weekly-merged.json}"
@@ -74,7 +73,7 @@ fi
     --days "$DAYS" \
     --output "$OUTPUT" \
     --markdown "$MARKDOWN" \
-    --enrich-tiers tier1 \
+    --enrich-top 20 \
     --verbose
 
 echo ""
@@ -90,6 +89,6 @@ echo ""
 echo "agent 会："
 echo "  1. 读 competitor-monitor.md 拿到产品规则"
 echo "  2. 读上面的 JSON 数据"
-echo "  3. 按 4 阶段处理（语义去重 → 发布验证 → 三维度分类 → 写报告）"
+echo "  3. 按社区讨论量选题、按情绪分组写报告（含跨事件社区反馈大章）"
 echo "  4. 生成自然语言周报返回"
 echo "=================================================="

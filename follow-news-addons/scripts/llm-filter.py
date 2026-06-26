@@ -79,7 +79,7 @@ def _regroup_by_topic(articles: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any
 
 def _short_id(article: Dict[str, Any]) -> str:
     """Stable short id for LLM to refer back to articles."""
-    seed = (article.get("link") or article.get("reddit_url") or article.get("title") or "")
+    seed = (article.get("link") or article.get("title") or "")
     return hashlib.md5(seed.encode("utf-8")).hexdigest()[:8]
 
 
