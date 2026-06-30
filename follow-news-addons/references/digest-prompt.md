@@ -193,3 +193,14 @@ Save to `<WORKSPACE>/archive/follow-news/<MODE>-YYYY-MM-DD.md`. Delete files old
    - Omit `--from` if `<EMAIL_FROM>` is not set. Omit `--attach` if PDF generation failed. SUBJECT must be a static string. If delivery fails, log error and continue.
 
 Write the report in <LANGUAGE>.
+
+## 输出文件（飞书云文档兼容）
+
+撰写完日报后，除对话/Discord/Email 投递外，**还要把最终报告另存为一个飞书云文档兼容的 `.md` 文件**：
+
+- **先读 `<SKILL_DIR>/references/templates/feishu.md` 并严格遵循**（落盘文件名约定 + 飞书兼容 Markdown 子集 + 链接纪律）。
+- 文件名：`reports/ai-pulse-daily-<YYYY-MM-DD>.md`（日报不带 slug）；写前 `mkdir -p reports`。
+- 只用飞书兼容子集：ATX 标题、GFM 表格、`---`、行内 `[文字](url)` 链接、`>` 引用、围栏代码、emoji；
+  **禁止裸 HTML / `<url>` 自动链接 / 三层以上嵌套**（email 模板的内联样式不要用在此文件）。
+- **绝不编造链接**——只引用数据里真实存在的 `url`，无链接就不写。
+- 写完把文件相对路径告知用户。

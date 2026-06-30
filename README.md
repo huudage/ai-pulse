@@ -220,6 +220,11 @@ bash deploy-skill.sh --skip-doctor               # 跳过 doctor.sh
 
 或直接在 OpenClaw 对话里说触发词，由 agent 路由触发。
 
+> 每个 skill 的 agent 写完报告后，除对话展示外**还会把最终报告落地为 `reports/<skill-id>-…-<日期>.md`**——
+> 一个**飞书云文档兼容**的 Markdown 文件（新建飞书文档 → 粘贴即渲染）。格式规范见
+> [`follow-news-addons/references/templates/feishu.md`](follow-news-addons/references/templates/feishu.md)。
+> `reports/` 是运行时产物目录，已 gitignore、不入库。
+
 ---
 
 ## 升级

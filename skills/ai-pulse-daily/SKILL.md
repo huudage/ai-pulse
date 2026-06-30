@@ -29,3 +29,5 @@ bash <ENGINE_DIR>/scripts/daily-digest.sh
 - 按需用 `<ENGINE_DIR>/follow-news-addons/references/templates/{chat,discord,email,pdf}.md` 渲染。
 - **不要编造链接**——只用数据里的 `url` 字段。
 - 信源缺失（API key 未配 / 抓取失败）时优雅降级，照实说明覆盖度，不报错中断。
+- **输出报告文件**：写完后按 `<ENGINE_DIR>/follow-news-addons/references/templates/feishu.md` 规范，
+  把最终报告另存为 `reports/ai-pulse-daily-<YYYY-MM-DD>.md`（飞书云文档兼容，先 `mkdir -p reports`），并把文件路径告知用户。

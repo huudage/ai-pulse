@@ -6,7 +6,8 @@ ai-pulse 是 follow-news 上游 + TrendRadar 中文热榜 + 自研 addons 的合
 - 信源采集层：`scripts/run-pipeline.py` 串联 `fetch-rss / fetch-github / fetch-twitter / fetch-web / fetch-podcast`
 - 中文社区层：TrendRadar SQLite + `weekly_export.py` → file:// RSS → run-pipeline 接入
 - 评论富化层：`scripts/enrich_comments.py`（HN/V2EX 零鉴权 JSON API）
-- 分发模板：`references/templates/{chat,discord,email,pdf}.md` + `references/digest-prompt.md`
+- 分发模板：`references/templates/{chat,discord,email,pdf,feishu}.md` + `references/digest-prompt.md`
+- 报告落盘：4 个 skill 的 agent 写完报告后，均按 `references/templates/feishu.md` 把最终报告另存为 `reports/<skill-id>-…-<日期>.md`（飞书云文档兼容；`reports/` 运行时产物，gitignore）
 
 ---
 
@@ -131,6 +132,7 @@ python3 scripts/competitor-brief.py \
 ```
 
 - 官方源经 `fetch-competitor-official.py`（github releases / changelog CSS / sitemap / App Store / RSS），每源 try/except 软降级 + `coverage[]` 注记（ok(N)/skip(unconfigured)/error/degrade）。
+- 官方源覆盖度（2026-06 实测）：有可用源 14；腾讯文档 AI 经 App Store `id=1370780836` 补全。其余无源竞品（MarsCode / 通义灵码 / 文心快码 Comate / CodeBuddy / Fitten Code / WorkBuddy / 实在智能 TARS / 来也 Laiye）官网为 JS 渲染 SPA 或无公开 releases，`competitor-profiles.json` 中以 `_source_note` 字段标注留空原因，靠 KOL 兜底，待人工补——**不填猜测 URL**。
 - KOL 经 `fetch-competitor-kol.py` 多平台采集（B站匿名 + 知乎/即刻/公众号需凭证），缺凭证软降级为空。
 - `--window-days` 默认 30；零 LLM，方向/场景 synthesis 由 agent 按 `references/prompts/competitor-brief.md` 完成。**只用数据 url，禁止编造链接**。
 

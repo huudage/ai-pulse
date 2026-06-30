@@ -124,3 +124,14 @@ PYTHONUTF8=1 python scripts/competitor-brief.py \
 - `updates` 为空 + `kol_contents` 为空 → 脚本 markdown 会写"暂无足够数据"；你照实告知用户"本期未采集到该对象官方动态或 KOL 内容"，建议放宽 `--window-days` 或补全 profiles 官方源。
 - `kol_contents` 为空时（B站受风控 / 知乎·即刻·公众号未配置凭证）——**跳过 KOL 小节，不报错、不编造**。
 - 链接一律用 `url` 字段原值；方向/场景一律标注"推断"。
+
+## 输出文件（飞书云文档兼容）
+
+写完竞品调研后，除对话展示外，**还要把最终简报另存为一个飞书云文档兼容的 `.md` 文件**：
+
+- **先读 `references/templates/feishu.md` 并严格遵循**（落盘文件名约定 + 飞书兼容 Markdown 子集 + 链接纪律）。
+- 文件名：`reports/ai-pulse-brief-[<slug>-]<YYYY-MM-DD>.md`——单产品/单行业带 `<slug>`（产品名/行业名小写转连字符），全量（`--all`）不带 slug；写前 `mkdir -p reports`。
+- 只用飞书兼容子集：ATX 标题、GFM 表格、`---`、行内 `[文字](url)` 链接、`>` 引用、围栏代码、emoji；
+  **禁止裸 HTML / `<url>` 自动链接 / 三层以上嵌套**。官方动态三要素与 KOL 条目的链接全部用数据 `url` 原值。
+- **绝不编造链接**——方向/场景结论标注"推断"；某产品无数据就如实写"暂无足够数据"。
+- 写完把文件相对路径告知用户。

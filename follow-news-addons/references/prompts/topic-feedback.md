@@ -239,3 +239,14 @@ python3 scripts/topic-feedback.py \
 ```
 
 如果某字段缺失或某源 status 不是 `"ok"`，跳过对应模板段落，并在"数据来源 & 局限"段如实说明，**不要编造**。
+
+## 输出文件（飞书云文档兼容）
+
+写完单事件社区反馈后，除对话展示外，**还要把最终报告另存为一个飞书云文档兼容的 `.md` 文件**：
+
+- **先读 `references/templates/feishu.md` 并严格遵循**（落盘文件名约定 + 飞书兼容 Markdown 子集 + 链接纪律）。
+- 文件名：`reports/ai-pulse-topic-<slug>-<YYYY-MM-DD>.md`，`<slug>` 由查询词小写转连字符（如 `Claude Code` → `claude-code`）；写前 `mkdir -p reports`。
+- 只用飞书兼容子集：ATX 标题、GFM 表格、`---`、行内 `[文字](url)` 链接、`>` 引用、围栏代码、emoji；
+  **禁止裸 HTML / `<url>` 自动链接 / 三层以上嵌套**。HN/V2EX/KOL 评论原文用 `>` 引用块 + 各自真实 `url`。
+- **绝不编造链接 / 评论 / 计数**——只引用数据里真实存在的 `url` 与字段；某源空就如实写空。
+- 写完把文件相对路径告知用户。

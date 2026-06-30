@@ -32,3 +32,5 @@ KOL（B站匿名 + 知乎/即刻/公众号需 `.env` 凭证，缺则 coverage=sk
 - **CRITICAL — 先读 `<ENGINE_DIR>/follow-news-addons/references/prompts/topic-feedback.md` 并严格遵循其输入数据契约。**
 - **不要编造链接**——只用数据里的 `url` 字段。
 - 某源无结果时照实说明（如"该话题在中文热榜暂无命中"），不编造、不报错中断。
+- **输出报告文件**：写完后按 `<ENGINE_DIR>/follow-news-addons/references/templates/feishu.md` 规范，
+  把最终报告另存为 `reports/ai-pulse-topic-<slug>-<YYYY-MM-DD>.md`（`<slug>` 由查询词小写转连字符；飞书云文档兼容，先 `mkdir -p reports`），并把文件路径告知用户。

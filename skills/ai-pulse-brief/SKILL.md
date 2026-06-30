@@ -40,3 +40,5 @@ bash <ENGINE_DIR>/scripts/competitor-brief.sh --product "通义灵码" --window-
   或补全 `<ENGINE_DIR>/follow-news-addons/workspace/config/competitor-profiles.json` 的 official_sources。
   KOL 未就绪时跳过该小节，不报错、不编造。
 - **不要编造链接**——只用数据里的 `url` 字段。
+- **输出报告文件**：写完后按 `<ENGINE_DIR>/follow-news-addons/references/templates/feishu.md` 规范，
+  把最终报告另存为 `reports/ai-pulse-brief-[<slug>-]<YYYY-MM-DD>.md`（单产品/单行业带 `<slug>`，全量不带；飞书云文档兼容，先 `mkdir -p reports`），并把文件路径告知用户。

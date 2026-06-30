@@ -35,7 +35,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
     },
     {
       "name": "通义灵码",
@@ -54,7 +55,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
     },
     {
       "name": "文心快码 Comate",
@@ -72,7 +74,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
     },
     {
       "name": "CodeGeeX",
@@ -106,7 +109,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
     },
     {
       "name": "Fitten Code",
@@ -123,7 +127,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
     },
     {
       "name": "aiXcoder",
@@ -376,7 +381,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "暂未找到公开官方动态源（无 GitHub releases / 静态 changelog / App Store 条目），待人工补"
     },
     {
       "name": "钉钉 AI 助理",
@@ -465,7 +471,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "暂未找到公开官方 changelog/RSS，无公开 GitHub releases，靠 KOL 兜底，待人工补"
     },
     {
       "name": "影刀 RPA",
@@ -501,7 +508,8 @@
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
-      }
+      },
+      "_source_note": "官网 sitemap 的 lastmod 全为构建当天日期（无效更新信号），无公开 GitHub releases，留空待人工补"
     }
   ]
 }
