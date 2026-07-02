@@ -1,5 +1,5 @@
 {
-  "_comment": "国产 Agent 竞品监测档案。增删产品或调整官方源仅改此文件，不改主流程代码（FR-001/SC-007）。official_sources 子项逐项可选：未知的源填 null，用户后续补全 URL/选择器/App Store ID。github_repo 用 'owner/repo'；app_store_id 用 Apple 数字 ID。schema 见 specs/006-domestic-agent-monitor/contracts/competitor-profile.md。注（2026-06 实测）：MarsCode / 通义灵码 / 文心快码 Comate / CodeBuddy / Fitten Code 官网均为 SPA（首屏无静态 changelog，css 选择器抓取得 ok(0)），且无公开 GitHub releases；laiye.com sitemap 的 lastmod 全为构建当天日期（无效信号），故留 null 不填猜测源，靠 KOL 兜底。腾讯文档 AI 经 App Store id=1370780836（腾讯文档主 app）补全。",
+  "_comment": "国产 Agent 竞品监测档案。增删产品或调整官方源仅改此文件，不改主流程代码（FR-001/SC-007）。official_sources 子项逐项可选：未知的源填 null，用户后续补全。github_repo 用 'owner/repo'；app_store_id 用 Apple 数字 ID；jetbrains_plugin_id 用 JetBrains 插件市场数字 ID（走公开 updates API 拿版本+日期）。schema 见 specs/006-domestic-agent-monitor/contracts/competitor-profile.md。注（2026-07 实测）：通义灵码=JetBrains 17809、文心快码 Comate=23475、腾讯云 CodeBuddy=24379 三个代码助手改用 JetBrains updates API 补全；腾讯文档 AI=App Store 1370780836。仍无干净源：MarsCode（已并入 Trae，见 Trae github）、Fitten Code（VSCode Marketplace 为 POST-only）、实在智能 TARS / 来也 Laiye（SPA 无版本日志）——留 null 靠 KOL 兜底，不填猜测源。",
   "profiles": [
     {
       "name": "Trae",
@@ -36,7 +36,7 @@
         "app_store_id": null,
         "rss_url": null
       },
-      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
+      "_source_note": "无独立官方源：官方文档站 docs.marscode.cn 已 301 跳转到 docs.trae.com.cn（MarsCode 正并入 Trae，web 核实）——版本迭代信号见 Trae profile 的 github_repo。不在 JetBrains 市场。留空靠 KOL 兜底。"
     },
     {
       "name": "通义灵码",
@@ -54,9 +54,10 @@
         "css_selector": null,
         "docs_sitemap_url": null,
         "app_store_id": null,
+        "jetbrains_plugin_id": "17809",
         "rss_url": null
       },
-      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
+      "_source_note": "官网/文档为 SPA、无公开 GitHub releases；改用 JetBrains 插件市场公开 updates API（plugin 17809，现名 Qoder CN (Formerly Lingma)，web 核实），拿版本号+发布日期。近 30 天高频迭代（如 3.2.x）。"
     },
     {
       "name": "文心快码 Comate",
@@ -73,9 +74,10 @@
         "css_selector": null,
         "docs_sitemap_url": null,
         "app_store_id": null,
+        "jetbrains_plugin_id": "23475",
         "rss_url": null
       },
-      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
+      "_source_note": "官网/文档为 SPA、无公开 GitHub releases；改用 JetBrains 插件市场公开 updates API（plugin 23475 Baidu Comate，web 核实），拿版本号+发布日期。近 30 天高频迭代（如 4.10.x）。"
     },
     {
       "name": "CodeGeeX",
@@ -108,9 +110,10 @@
         "css_selector": null,
         "docs_sitemap_url": null,
         "app_store_id": null,
+        "jetbrains_plugin_id": "24379",
         "rss_url": null
       },
-      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
+      "_source_note": "官网/文档为 SPA、无公开 GitHub releases；改用 JetBrains 插件市场公开 updates API（plugin 24379 Tencent Cloud CodeBuddy，web 核实），拿版本号+发布日期。"
     },
     {
       "name": "Fitten Code",
@@ -128,7 +131,7 @@
         "app_store_id": null,
         "rss_url": null
       },
-      "_source_note": "官网为 SPA（首屏无静态 changelog），且无公开 GitHub releases，留空靠 KOL 兜底，待人工补官方源"
+      "_source_note": "无干净可抓源：不在 JetBrains 市场；Open VSX 镜像（FittenTech/Fitten-Code）停在 2025-05 已陈旧；活跃渠道是微软 VSCode Marketplace（gallery 为 POST-only API，纯 GET 抓不到，web 核实）。留空靠 KOL 兜底。"
     },
     {
       "name": "aiXcoder",
@@ -376,13 +379,13 @@
       "enabled": true,
       "official_sources": {
         "github_repo": null,
-        "changelog_url": null,
-        "css_selector": null,
+        "changelog_url": "https://www.codebuddy.cn/docs/workbuddy/Changelog",
+        "css_selector": "h2",
         "docs_sitemap_url": null,
         "app_store_id": null,
         "rss_url": null
       },
-      "_source_note": "暂未找到公开官方动态源（无 GitHub releases / 静态 changelog / App Store 条目），待人工补"
+      "_source_note": "腾讯旗下桌面 Agent。官方 changelog（VitePress 静态渲染，web 核实）：版本标题为 h2 且内联日期（如「5.1.7 版本发布（2026-06-26）」），故 css_selector=h2；fetcher 已加「同源有日期则丢弃无日期噪音 + 页内锚点 urljoin 成深链」。产品页 https://copilot.tencent.com/work/"
     },
     {
       "name": "钉钉 AI 助理",
@@ -472,7 +475,7 @@
         "app_store_id": null,
         "rss_url": null
       },
-      "_source_note": "暂未找到公开官方 changelog/RSS，无公开 GitHub releases，靠 KOL 兜底，待人工补"
+      "_source_note": "无干净可抓源：官网 www.ai-indeed.com 为 JS 渲染、无 changelog/版本发布页；无公开 GitHub releases；不在 JetBrains/App Store（RPA 桌面端，web 核实）。留空靠 KOL 兜底。"
     },
     {
       "name": "影刀 RPA",
@@ -509,7 +512,7 @@
         "app_store_id": null,
         "rss_url": null
       },
-      "_source_note": "官网 sitemap 的 lastmod 全为构建当天日期（无效更新信号），无公开 GitHub releases，留空待人工补"
+      "_source_note": "无干净可抓源：官网 laiye.com 为 Nuxt SPA，更新只散落在新闻贴（无结构化版本日志）；sitemap lastmod 全为构建当天日期（无效信号）；无公开 GitHub releases（web 核实）。留空靠 KOL 兜底。"
     }
   ]
 }

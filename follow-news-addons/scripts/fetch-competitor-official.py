@@ -37,7 +37,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 _SSL_CTX = ssl.create_default_context()
@@ -242,25 +242,39 @@ def fetch_changelog(product: str, url: str, css_selector: Optional[str], window_
     """Official changelog HTML scrape via per-product CSS selector (R1, FR-002a).
 
     Selector grammar supported (deterministic, no heavy dep): tag, .class, #id,
-    and 'tag.class'. No match / unreachable → [] (degrade, caller annotates)."""
+    and 'tag.class'. No match / unreachable → [] (degrade, caller annotates).
+
+    Two clean-up rules for real-world docs pages (e.g. VitePress changelogs that
+    render full version history + nav headings in one page):
+      - If the source has any dated entry, undated blocks are dropped as noise
+        (old-version headings without inline dates, sidebar/section titles).
+        A source with NO dated entry at all keeps undated blocks (best-effort).
+      - In-page anchor / relative hrefs are resolved against the page URL so each
+        entry gets a clickable deep link instead of a bare '#fragment'."""
     if not url or not css_selector:
         return []
     htmltext = http_get_text(url)
     if not htmltext:
         return []
     blocks = _select_blocks(htmltext, css_selector)
-    out: List[Dict[str, Any]] = []
+    parsed = []
     for block in blocks[:50]:
         title = _strip_html(block)
         if not title:
             continue
-        href = _first_href(block)
         dt = parse_date(_first_date_str(block))
+        parsed.append((title, _first_href(block), dt, block))
+    has_dated = any(dt for _, _, dt, _ in parsed)
+    out: List[Dict[str, Any]] = []
+    for title, href, dt, _block in parsed:
+        if dt is None and has_dated:
+            continue  # drop undated noise when the source clearly carries dates
         if not within_window(dt, window_days):
             continue
+        link = urljoin(url, href) if href else url
         out.append(_mk_update(
             product, "feature", _truncate(title, 160),
-            href or url, dt, title, "changelog",
+            link, dt, title, "changelog",
         ))
     return out
 
@@ -369,6 +383,42 @@ def fetch_appstore(product: str, app_id: str, window_days: int) -> List[Dict[str
     return out
 
 
+def fetch_jetbrains(product: str, plugin_id: str, window_days: int) -> List[Dict[str, Any]]:
+    """JetBrains Marketplace plugin version history via the public updates API (R1).
+
+    Many CN IDE-plugin products (通义灵码 / 文心快码 / 腾讯云 CodeBuddy) ship no static
+    changelog page but publish clean, dated version history here. type=release,
+    source_kind=jetbrains. `cdate` is epoch-milliseconds; `notes` carries the
+    per-version changelog HTML (used as summary). Link points at the plugin page."""
+    if not plugin_id:
+        return []
+    url = f"https://plugins.jetbrains.com/api/plugins/{quote(str(plugin_id))}/updates?size=20"
+    payload = http_get_json(url)
+    if not isinstance(payload, list):
+        return []
+    page = f"https://plugins.jetbrains.com/plugin/{quote(str(plugin_id))}"
+    out: List[Dict[str, Any]] = []
+    for rel in payload:
+        if not isinstance(rel, dict):
+            continue
+        dt = None
+        cdate = rel.get("cdate")
+        if cdate is not None:
+            try:
+                dt = datetime.fromtimestamp(int(cdate) / 1000, tz=timezone.utc)
+            except (ValueError, TypeError, OverflowError):
+                dt = None
+        if not within_window(dt, window_days):
+            continue
+        ver = rel.get("version") or ""
+        out.append(_mk_update(
+            product, "release",
+            f"{product} {ver}".strip(),
+            page, dt, _strip_html(rel.get("notes") or ""), "jetbrains",
+        ))
+    return out
+
+
 def fetch_rss(product: str, url: str, window_days: int) -> List[Dict[str, Any]]:
     """RSS/Atom feed items in window (R1). type=feature."""
     if not url:
@@ -409,7 +459,7 @@ def fetch_rss(product: str, url: str, window_days: int) -> List[Dict[str, Any]]:
 
 # ─── Orchestration / CLI (T014) ───────────────────────────────────────────────
 
-_SOURCE_LABELS = ["github", "changelog", "sitemap", "appstore", "rss"]
+_SOURCE_LABELS = ["github", "changelog", "sitemap", "appstore", "jetbrains", "rss"]
 
 
 def crawl_product(profile: Dict[str, Any], window_days: int, token: Optional[str]) -> tuple:
@@ -447,6 +497,7 @@ def crawl_product(profile: Dict[str, Any], window_days: int, token: Optional[str
         coverage["changelog"] = "skip(unconfigured)"
     run("sitemap", fetch_sitemap, src.get("docs_sitemap_url"), window_days)
     run("appstore", fetch_appstore, src.get("app_store_id"), window_days)
+    run("jetbrains", fetch_jetbrains, src.get("jetbrains_plugin_id"), window_days)
     run("rss", fetch_rss, src.get("rss_url"), window_days)
 
     if not updates and all(
