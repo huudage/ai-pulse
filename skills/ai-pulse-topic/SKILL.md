@@ -9,11 +9,15 @@ description: 单事件社区反馈。针对单个事件/话题（如 "Cursor age
 ai-pulse bundle 的「单事件社区反馈」skill。共享引擎在 `<ENGINE_DIR>`（部署后为 `ai-pulse-engine/`），
 数据零 LLM 机械产出；解读由你（agent）按 prompt 完成。
 
+> ⚠️ **执行顺序（强制，不可跳过）**：本 skill 的一切数据**只能**来自下面「第 1 步」脚本产出的 JSON。
+> **必须先运行脚本、拿到 JSON，再解读**。脚本跑出数据前，**禁止**凭训练知识 / 记忆 / 网页搜索自行编写任何社区反馈内容；
+> 若本次会话还没跑过该脚本，现在立即运行。这是零-LLM 数据面与 agent 撰写面的分工底线——跳过脚本直接写 = 错误产出。
+
 ## 触发
 
 针对**单个**事件/话题问社区反应（"社区对 X 怎么看"、"X 发布后大家反响如何"），但不要完整周报。
 
-## 执行
+## 第 1 步 · 执行脚本（必须先跑，不可跳过）
 
 ```bash
 bash <ENGINE_DIR>/scripts/topic-feedback.sh --query "Cursor agent mode"
@@ -27,8 +31,9 @@ bash <ENGINE_DIR>/scripts/topic-feedback.sh --query "Cursor agent mode"
 源覆盖：HN（评论原文，默认抓 top5×5）、V2EX（零鉴权评论原文）、TrendRadar 中文热榜、
 KOL（B站匿名 + 知乎/即刻/公众号需 `.env` 凭证，缺则 coverage=skip）、Twitter（best-effort）。
 
-## 解读
+## 第 2 步 · 解读（脚本产出 JSON 之后）
 
+- **前置检查**：确认第 1 步脚本已在本次会话跑过并产出 `/tmp/td-topic.json`；没有就先回到第 1 步，**绝不跳过、绝不凭记忆/训练知识/网页搜索代替**。
 - **CRITICAL — 先读 `<ENGINE_DIR>/follow-news-addons/references/prompts/topic-feedback.md` 并严格遵循其输入数据契约。**
 - **不要编造链接**——只用数据里的 `url` 字段。
 - 某源无结果时照实说明（如"该话题在中文热榜暂无命中"），不编造、不报错中断。
